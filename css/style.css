@@ -108,6 +108,7 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 }
 .row-item:first-of-type { border-top: none; }
 .chev { color: var(--muted); font-size: 20px; }
+.row-actions { display: flex; align-items: center; gap: 8px; }
 .cat-head { display: flex; align-items: center; gap: 8px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 

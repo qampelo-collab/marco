@@ -100,6 +100,15 @@ function setActiveNav(hash) {
 
 function go(hash) { location.hash = hash; }
 
+// Einheit inkl. aller Sätze löschen.
+async function deleteWorkout(id) {
+  const sets = await db.byIndex('sets', 'workoutId', id);
+  for (const s of sets) await db.delete('sets', s.id);
+  await db.delete('workouts', id);
+  const cur = await db.getMeta('currentWorkout', null);
+  if (cur === id) await db.setMeta('currentWorkout', null);
+}
+
 // ==================================================================
 //  DASHBOARD
 // ==================================================================
@@ -243,8 +252,17 @@ async function renderTraining() {
         list.appendChild(h('div', { class: 'row-item', onclick: async () => {
           await db.setMeta('currentWorkout', w.id); route();
         } },
-          h('div', {}, h('strong', {}, fmtDate(w.date)), h('span', { class: 'muted' }, ` · ${sets.length} Sätze`)),
-          h('span', { class: 'chev' }, '›'),
+          h('div', {}, h('strong', {}, fmtDate(w.date)),
+            h('span', { class: 'muted' }, ` · ${sets.length} Sätze${w.templateName ? ' · ' + w.templateName : ''}`)),
+          h('div', { class: 'row-actions' },
+            h('button', { class: 'btn ghost small danger', onclick: async (e) => {
+              e.stopPropagation();
+              if (confirm(`Einheit vom ${fmtDate(w.date)} inkl. aller ${sets.length} Sätze löschen?`)) {
+                await deleteWorkout(w.id); route();
+              }
+            } }, '🗑'),
+            h('span', { class: 'chev' }, '›'),
+          ),
         ));
       }
       wrap.appendChild(list);
@@ -263,6 +281,11 @@ async function renderTraining() {
         await db.setMeta('currentWorkout', null); route();
       } }, 'Fertig / schließen'),
     ),
+    h('button', { class: 'btn ghost small danger', onclick: async () => {
+      if (confirm(`Diese Einheit inkl. aller ${sets.length} Sätze endgültig löschen?`)) {
+        await deleteWorkout(current.id); route();
+      }
+    } }, '🗑 Einheit löschen'),
   );
   wrap.appendChild(header);
 
