@@ -7,6 +7,7 @@ import { lineChart, barChart } from './charts.js';
 import { extractSetsFromImage, VISION_MODELS, DEFAULT_VISION_MODEL } from './vision.js';
 import { PLAN, installPlan, parseTargetSets } from './plan.js';
 import { applyTheme, ACCENTS, DEFAULT_ACCENT, DEFAULT_THEME } from './theme.js';
+import { applyI18n, getLang, setLang, detectLang, L } from './i18n.js';
 
 const app = document.getElementById('app');
 let FORMULA = 'epley';
@@ -71,6 +72,9 @@ const routes = {
 
 export async function initUI() {
   FORMULA = await db.getMeta('formula', 'epley');
+  let lang = await db.getMeta('lang', null);
+  if (!lang) { lang = detectLang(); await db.setMeta('lang', lang); }
+  setLang(lang);
   applyTheme(await db.getMeta('theme', DEFAULT_THEME), await db.getMeta('accent', DEFAULT_ACCENT));
   window.addEventListener('hashchange', route);
   route();
@@ -86,10 +90,12 @@ async function route() {
     const content = await view();
     clear(app);
     app.appendChild(content);
+    applyI18n(document.body);
     window.scrollTo(0, 0);
   } catch (err) {
     clear(app);
     app.appendChild(h('div', { class: 'card error' }, 'Fehler: ' + err.message));
+    applyI18n(document.body);
     console.error(err);
   }
 }
@@ -259,7 +265,10 @@ async function renderTraining() {
           h('div', { class: 'row-actions' },
             h('button', { class: 'btn ghost small danger', onclick: async (e) => {
               e.stopPropagation();
-              if (confirm(`Einheit vom ${fmtDate(w.date)} inkl. aller ${sets.length} Sätze löschen?`)) {
+              const q = getLang() === 'en'
+                ? `Delete session from ${fmtDate(w.date)} incl. all ${sets.length} sets?`
+                : `Einheit vom ${fmtDate(w.date)} inkl. aller ${sets.length} Sätze löschen?`;
+              if (confirm(q)) {
                 await deleteWorkout(w.id); route();
               }
             } }, '🗑'),
@@ -284,7 +293,10 @@ async function renderTraining() {
       } }, 'Fertig / schließen'),
     ),
     h('button', { class: 'btn ghost small danger', onclick: async () => {
-      if (confirm(`Diese Einheit inkl. aller ${sets.length} Sätze endgültig löschen?`)) {
+      const q = getLang() === 'en'
+        ? `Permanently delete this session incl. all ${sets.length} sets?`
+        : `Diese Einheit inkl. aller ${sets.length} Sätze endgültig löschen?`;
+      if (confirm(q)) {
         await deleteWorkout(current.id); route();
       }
     } }, '🗑 Einheit löschen'),
@@ -430,7 +442,7 @@ async function renderTraining() {
     h('button', { class: 'btn primary', onclick: async () => {
       const weight = parseFloat(weightInp.value);
       const reps = parseInt(repsInp.value, 10);
-      if (!(weight > 0) || !(reps > 0)) { alert('Bitte Gewicht und Wiederholungen eingeben.'); return; }
+      if (!(weight > 0) || !(reps > 0)) { alert(L('Bitte Gewicht und Wiederholungen eingeben.')); return; }
       const exId = parseInt(exSel.value, 10);
       // Bestwert VOR diesem Satz merken → Rekord-Erkennung.
       const prevBest = bestE1rm(enriched.filter((s) => s.exerciseId === exId), FORMULA).value;
@@ -445,7 +457,10 @@ async function renderTraining() {
       });
       if (newE > prevBest && prevBest > 0) {
         const ex = eById.get(exId);
-        toast(`🏆 Neuer Rekord bei ${ex ? ex.name : 'Übung'}: ${newE} kg (vorher ${prevBest} kg)`);
+        const nm = ex ? ex.name : (getLang() === 'en' ? 'exercise' : 'Übung');
+        toast(getLang() === 'en'
+          ? `🏆 New record on ${nm}: ${newE} kg (was ${prevBest} kg)`
+          : `🏆 Neuer Rekord bei ${nm}: ${newE} kg (vorher ${prevBest} kg)`);
       }
       route();
     } }, '+ Satz speichern'),
@@ -502,7 +517,7 @@ async function renderExercises() {
       h('label', { class: 'field' }, h('span', {}, 'Gerät'), equipInp),
     ),
     h('button', { class: 'btn primary', onclick: async () => {
-      if (!nameInp.value.trim()) { alert('Bitte Namen eingeben.'); return; }
+      if (!nameInp.value.trim()) { alert(L('Bitte Namen eingeben.')); return; }
       await db.add('exercises', { name: nameInp.value.trim(), category: catSel.value, equipment: equipInp.value.trim(), unit: 'kg' });
       route();
     } }, '+ Übung anlegen'),
@@ -627,7 +642,7 @@ async function renderPlans() {
   }
 
   wrap.appendChild(h('button', { class: 'btn ghost', onclick: async () => {
-    if (confirm('Plan neu installieren? Vorhandene Vorlagen dieses Plans werden ersetzt (deine Trainingsdaten bleiben erhalten).')) {
+    if (confirm(L('Plan neu installieren? Vorhandene Vorlagen dieses Plans werden ersetzt (deine Trainingsdaten bleiben erhalten).'))) {
       await installPlan(db); route();
     }
   } }, 'Plan zurücksetzen / aktualisieren'));
@@ -663,7 +678,7 @@ async function renderBody() {
     ),
     h('button', { class: 'btn primary', onclick: async () => {
       const weight = parseFloat(wI.value);
-      if (!(weight > 0) && !chestI.value && !waistI.value) { alert('Bitte mindestens einen Wert eingeben.'); return; }
+      if (!(weight > 0) && !chestI.value && !waistI.value) { alert(L('Bitte mindestens einen Wert eingeben.')); return; }
       await db.add('body', {
         date: dateI.value || todayStr(),
         weight: weight || null,
@@ -714,7 +729,7 @@ async function renderNutrition() {
     ),
     h('label', { class: 'field' }, h('span', {}, 'Notiz'), noteI),
     h('button', { class: 'btn primary', onclick: async () => {
-      if (!protI.value && !kcalI.value) { alert('Bitte Protein oder Kalorien eingeben.'); return; }
+      if (!protI.value && !kcalI.value) { alert(L('Bitte Protein oder Kalorien eingeben.')); return; }
       await db.add('nutrition', { date: dateI.value || todayStr(), protein: num(protI.value), calories: num(kcalI.value), notes: noteI.value.trim() });
       route();
     } }, '+ Speichern'),
@@ -754,7 +769,7 @@ async function renderActivity() {
     h('label', { class: 'field' }, h('span', {}, 'Datum'), dateI),
     h('label', { class: 'field' }, h('span', {}, 'Schritte'), stepI),
     h('button', { class: 'btn primary', onclick: async () => {
-      if (!stepI.value) { alert('Bitte Schritte eingeben.'); return; }
+      if (!stepI.value) { alert(L('Bitte Schritte eingeben.')); return; }
       await db.add('activity', { date: dateI.value || todayStr(), steps: num(stepI.value) });
       route();
     } }, '+ Speichern'),
@@ -799,8 +814,16 @@ async function renderSettings() {
       onclick: async () => { await db.setMeta('accent', key); applyTheme(await db.getMeta('theme', DEFAULT_THEME), key); route(); },
     }));
   }
+  // Sprache
+  const curLang = getLang();
+  const deBtn = h('button', { class: 'btn ghost' + (curLang !== 'en' ? ' on' : '') }, 'Deutsch');
+  const enBtn = h('button', { class: 'btn ghost' + (curLang === 'en' ? ' on' : '') }, 'English');
+  deBtn.onclick = async () => { await db.setMeta('lang', 'de'); setLang('de'); route(); };
+  enBtn.onclick = async () => { await db.setMeta('lang', 'en'); setLang('en'); route(); };
+
   wrap.appendChild(h('div', { class: 'card' },
     h('h2', {}, '🎨 Aussehen'),
+    h('label', { class: 'field' }, h('span', {}, 'Sprache'), h('div', { class: 'seg' }, deBtn, enBtn)),
     h('label', { class: 'field' }, h('span', {}, 'Modus'), h('div', { class: 'seg' }, darkBtn, lightBtn)),
     h('label', { class: 'field' }, h('span', {}, 'Akzentfarbe'), swatches),
   ));
@@ -853,7 +876,7 @@ async function renderSettings() {
     h('button', { class: 'btn primary', onclick: async () => {
       await db.setMeta('apiKey', keyInp.value.trim());
       await db.setMeta('visionModel', modelSel.value);
-      toast('KI-Einstellungen gespeichert.');
+      toast(L('KI-Einstellungen gespeichert.'));
     } }, 'Speichern'),
     h('p', { class: 'muted small' }, 'Schlüssel erstellen unter console.anthropic.com. Ohne Schlüssel bleibt die App voll nutzbar (manuelle Eingabe).'),
   ));
@@ -871,7 +894,7 @@ async function renderSettings() {
   wrap.appendChild(h('div', { class: 'card' },
     h('h2', {}, 'Zurücksetzen'),
     h('button', { class: 'btn ghost danger', onclick: async () => {
-      if (confirm('Wirklich ALLE Daten löschen? Vorher am besten ein Backup machen.')) {
+      if (confirm(L('Wirklich ALLE Daten löschen? Vorher am besten ein Backup machen.'))) {
         for (const s of ['exercises', 'workouts', 'sets', 'body', 'nutrition', 'activity', 'templates']) await db.clear(s);
         await db.setMeta('currentWorkout', null);
         await db.setMeta('planV1Installed', false);
@@ -896,14 +919,14 @@ async function exportBackup() {
 async function importBackup(e) {
   const file = e.target.files[0];
   if (!file) return;
-  if (!confirm('Import ersetzt die aktuellen Daten. Fortfahren?')) return;
+  if (!confirm(L('Import ersetzt die aktuellen Daten. Fortfahren?'))) return;
   try {
     const text = await file.text();
     await importAll(JSON.parse(text), { replace: true });
-    alert('Backup importiert.');
+    alert(L('Backup importiert.'));
     location.hash = '#dashboard'; route();
   } catch (err) {
-    alert('Import fehlgeschlagen: ' + err.message);
+    alert(L('Import fehlgeschlagen: ') + err.message);
   }
 }
 
