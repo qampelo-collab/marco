@@ -1,9 +1,11 @@
 // app.js — Startpunkt der App.
-import { seedIfEmpty } from './db.js';
+import { db, seedIfEmpty } from './db.js';
+import { installPlanIfNeeded } from './plan.js';
 import { initUI } from './ui.js';
 
 async function main() {
   await seedIfEmpty();
+  await installPlanIfNeeded(db);
   await initUI();
 
   // Service Worker für Offline-Betrieb + Installierbarkeit registrieren.

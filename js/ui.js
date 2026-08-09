@@ -5,6 +5,7 @@ import { e1rm, progression, dayKey, totalVolume, weeklyVolumeByCategory, round1,
 import { buildSuggestions } from './coach.js';
 import { lineChart, barChart } from './charts.js';
 import { extractSetsFromImage, VISION_MODELS, DEFAULT_VISION_MODEL } from './vision.js';
+import { PLAN, installPlan, parseTargetSets } from './plan.js';
 
 const app = document.getElementById('app');
 let FORMULA = 'epley';
@@ -60,6 +61,7 @@ const routes = {
   '#dashboard': renderDashboard,
   '#training': renderTraining,
   '#uebungen': renderExercises,
+  '#plaene': renderPlans,
   '#koerper': renderBody,
   '#ernaehrung': renderNutrition,
   '#aktivitaet': renderActivity,
@@ -263,6 +265,29 @@ async function renderTraining() {
     ),
   );
   wrap.appendChild(header);
+
+  // Plan-Karte (wenn die Einheit aus einer Vorlage gestartet wurde)
+  if (current.plan && current.plan.length) {
+    const countByEx = {};
+    for (const s of sets) countByEx[s.exerciseId] = (countByEx[s.exerciseId] || 0) + 1;
+    const planCard = h('div', { class: 'card' }, h('h2', {}, '📋 ' + (current.templateName || 'Plan')));
+    for (const it of current.plan) {
+      const done = countByEx[it.exerciseId] || 0;
+      const target = parseTargetSets(it.scheme);
+      const complete = target && done >= target;
+      planCard.appendChild(h('div', { class: 'row-item', onclick: () => {
+        exSel.value = it.exerciseId;
+        prefillFromLast(true);
+        weightInp.focus();
+        weightInp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } },
+        h('div', {}, h('strong', {}, (complete ? '✅ ' : '') + it.exerciseName),
+          h('div', { class: 'muted small' }, `${it.scheme} · ${done}/${target || '?'} Sätze · Pause ${it.rest}${it.note ? ' · ' + it.note : ''}`)),
+        h('span', { class: 'chev' }, '›'),
+      ));
+    }
+    wrap.appendChild(planCard);
+  }
 
   // Eingabemaske Satz
   const exSel = h('select', { class: 'inp' },
@@ -532,6 +557,59 @@ async function renderExerciseDetail(id) {
 }
 
 // ==================================================================
+//  TRAININGSPLÄNE (Vorlagen)
+// ==================================================================
+async function renderPlans() {
+  const templates = [...await db.all('templates')];
+  const wrap = h('div', { class: 'view' });
+  wrap.appendChild(h('a', { class: 'back', href: '#einstellungen' }, '‹ Zurück zu Mehr'));
+  wrap.appendChild(h('h1', {}, 'Trainingspläne'));
+
+  if (!templates.length) {
+    wrap.appendChild(h('div', { class: 'card' },
+      h('p', { class: 'muted' }, 'Noch kein Plan installiert.'),
+      h('button', { class: 'btn primary', onclick: async () => { await installPlan(db); route(); } },
+        `${PLAN.name} installieren`),
+    ));
+    return wrap;
+  }
+
+  // Info-Karte: Wochenplan + Progression
+  wrap.appendChild(h('div', { class: 'card' },
+    h('h2', {}, '🗓️ ' + PLAN.name),
+    h('div', { class: 'muted small' }, PLAN.schedule),
+    h('div', { class: 'sug-text', style: 'margin-top:8px' }, PLAN.progressionNote),
+  ));
+
+  for (const t of templates) {
+    const card = h('div', { class: 'card' },
+      h('div', { class: 'chart-head' },
+        h('h2', {}, t.name),
+        h('button', { class: 'btn primary small', onclick: async () => {
+          const wid = await db.add('workouts', { date: todayStr(), notes: '', templateName: t.name, plan: t.items });
+          await db.setMeta('currentWorkout', wid);
+          go('#training');
+        } }, '▶ Starten'),
+      ),
+    );
+    for (const it of t.items) {
+      card.appendChild(h('div', { class: 'row-item static' },
+        h('div', {}, h('strong', {}, it.exerciseName),
+          h('div', { class: 'muted small' }, `${it.scheme} · Pause ${it.rest}${it.note ? ' · ' + it.note : ''}`)),
+      ));
+    }
+    wrap.appendChild(card);
+  }
+
+  wrap.appendChild(h('button', { class: 'btn ghost', onclick: async () => {
+    if (confirm('Plan neu installieren? Vorhandene Vorlagen dieses Plans werden ersetzt (deine Trainingsdaten bleiben erhalten).')) {
+      await installPlan(db); route();
+    }
+  } }, 'Plan zurücksetzen / aktualisieren'));
+  return wrap;
+}
+
+// ==================================================================
 //  KÖRPER (Gewicht + Maße)
 // ==================================================================
 async function renderBody() {
@@ -683,6 +761,12 @@ async function renderSettings() {
 
   // Weitere Bereiche
   wrap.appendChild(h('div', { class: 'card' },
+    h('h2', {}, 'Training'),
+    h('div', { class: 'row-item', onclick: () => go('#plaene') },
+      h('div', {}, h('strong', {}, '🗓️ Trainingspläne'), h('div', { class: 'muted small' }, 'Vorlagen starten (4er-Split)')),
+      h('span', { class: 'chev' }, '›')),
+  ));
+  wrap.appendChild(h('div', { class: 'card' },
     h('h2', {}, 'Tracking'),
     h('div', { class: 'row-item', onclick: () => go('#ernaehrung') },
       h('div', {}, h('strong', {}, '🥩 Ernährung'), h('div', { class: 'muted small' }, 'Protein & Kalorien erfassen')),
@@ -742,8 +826,9 @@ async function renderSettings() {
     h('h2', {}, 'Zurücksetzen'),
     h('button', { class: 'btn ghost danger', onclick: async () => {
       if (confirm('Wirklich ALLE Daten löschen? Vorher am besten ein Backup machen.')) {
-        for (const s of ['exercises', 'workouts', 'sets', 'body', 'nutrition', 'activity']) await db.clear(s);
+        for (const s of ['exercises', 'workouts', 'sets', 'body', 'nutrition', 'activity', 'templates']) await db.clear(s);
         await db.setMeta('currentWorkout', null);
+        await db.setMeta('planV1Installed', false);
         location.hash = '#dashboard'; route();
       }
     } }, 'Alle Daten löschen'),
