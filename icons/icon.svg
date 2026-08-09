@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="96" fill="#0f172a"/>
+  <g fill="none" stroke="#4ade80" stroke-width="26" stroke-linecap="round">
+    <!-- Langhantelstange -->
+    <line x1="120" y1="256" x2="392" y2="256"/>
+  </g>
+  <g fill="#4ade80">
+    <!-- Gewichtsscheiben links -->
+    <rect x="96" y="196" width="26" height="120" rx="10"/>
+    <rect x="132" y="216" width="24" height="80" rx="9"/>
+    <!-- Gewichtsscheiben rechts -->
+    <rect x="390" y="196" width="26" height="120" rx="10"/>
+    <rect x="356" y="216" width="24" height="80" rx="9"/>
+  </g>
+  <!-- Progressionspfeil -->
+  <polyline points="150,360 220,320 290,340 380,270" fill="none" stroke="#60a5fa" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="380,270 352,272 372,296" fill="#60a5fa"/>
+</svg>
