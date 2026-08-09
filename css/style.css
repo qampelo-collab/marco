@@ -160,6 +160,22 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .nav-item .ico { font-size: 20px; }
 .nav-item.active { color: var(--primary); }
 
+.hint.last { color: var(--muted); }
+.row-item.static { cursor: default; }
+.record-val { font-weight: 700; color: var(--primary); font-size: 15px; }
+
+/* Toast (z.B. neuer Rekord) */
+.toast {
+  position: fixed; left: 50%; bottom: 96px; transform: translate(-50%, 20px);
+  z-index: 60; max-width: 90%;
+  background: var(--bg-elev); color: var(--text);
+  border: 1px solid var(--primary); border-radius: 12px;
+  padding: 12px 18px; font-weight: 600; font-size: 14px; text-align: center;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  opacity: 0; transition: opacity .3s, transform .3s;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
 /* Photo overlay */
 .overlay {
   position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.9);

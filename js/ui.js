@@ -1,7 +1,7 @@
 // ui.js — Oberfläche: Router + alle Ansichten.
 
 import { db, exportAll, importAll } from './db.js';
-import { e1rm, progression, dayKey, totalVolume, weeklyVolumeByCategory, round1 } from './calc.js';
+import { e1rm, progression, dayKey, totalVolume, weeklyVolumeByCategory, round1, bestE1rm } from './calc.js';
 import { buildSuggestions } from './coach.js';
 import { lineChart, barChart } from './charts.js';
 
@@ -163,6 +163,24 @@ async function renderDashboard() {
     wrap.appendChild(card);
   }
 
+  // Rekorde (bestes geschätztes 1RM je Übung)
+  const records = [...byExercise.entries()]
+    .map(([id, sets]) => ({ name: sets[0].exerciseName, ...bestE1rm(sets, FORMULA) }))
+    .filter((r) => r.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 6);
+  if (records.length) {
+    const card = h('div', { class: 'card' }, h('h2', {}, '🏆 Rekorde (bestes 1RM)'));
+    for (const r of records) {
+      card.appendChild(h('div', { class: 'row-item static' },
+        h('div', {}, h('strong', {}, r.name),
+          r.set ? h('div', { class: 'muted small' }, `${r.set.weight} kg × ${r.set.reps} · ${fmtDate(r.set.date)}`) : null),
+        h('span', { class: 'record-val' }, r.value + ' kg'),
+      ));
+    }
+    wrap.appendChild(card);
+  }
+
   // Körpergewicht-Verlauf
   if (body.length >= 2) {
     const series = [...body].sort((a, b) => a.date.localeCompare(b.date))
@@ -185,8 +203,13 @@ function kpi(value, label) {
 //  TRAINING ERFASSEN
 // ==================================================================
 async function renderTraining() {
-  const exercises = await db.all('exercises');
-  const workouts = [...await db.all('workouts')].sort((a, b) => b.date.localeCompare(a.date));
+  const { enriched, workouts: allWorkouts, exercises } = await loadEnrichedSets();
+  const workouts = [...allWorkouts].sort((a, b) => b.date.localeCompare(a.date));
+
+  // Zuletzt benutzter Satz einer Übung (für Vorbefüllung).
+  const lastSetFor = (exId) => enriched
+    .filter((s) => s.exerciseId === exId)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.ts || 0) - (a.ts || 0))[0] || null;
 
   // aktuelle (offene) Einheit = zuletzt gewählte im Meta, sonst neu über Button
   let currentId = await db.getMeta('currentWorkout', null);
@@ -255,16 +278,34 @@ async function renderTraining() {
   });
 
   const e1rmHint = h('div', { class: 'hint' }, '');
+  const lastHint = h('div', { class: 'hint last' }, '');
   function updateHint() {
     const v = e1rm(parseFloat(weightInp.value), parseInt(repsInp.value, 10), FORMULA);
     e1rmHint.textContent = v > 0 ? `≈ 1RM: ${round1(v)} kg` : '';
   }
+  // Vorbefüllung: zuletzt benutzte Werte + Bestwert-Hinweis für die gewählte Übung.
+  function prefillFromLast(overwrite) {
+    const exId = parseInt(exSel.value, 10);
+    const last = lastSetFor(exId);
+    const best = bestE1rm(enriched.filter((s) => s.exerciseId === exId), FORMULA);
+    if (last) {
+      if (overwrite || !weightInp.value) weightInp.value = last.weight;
+      if (overwrite || !repsInp.value) repsInp.value = last.reps;
+      lastHint.textContent = `Letztes Mal (${fmtDate(last.date)}): ${last.weight} kg × ${last.reps}` +
+        (best.value ? ` · Bestes 1RM: ${best.value} kg` : '');
+    } else {
+      lastHint.textContent = 'Noch keine Historie für diese Übung.';
+    }
+    updateHint();
+  }
+  exSel.addEventListener('change', () => prefillFromLast(true));
   weightInp.addEventListener('input', updateHint);
   repsInp.addEventListener('input', updateHint);
 
   const form = h('div', { class: 'card' },
     h('h2', {}, 'Satz hinzufügen'),
     h('label', { class: 'field' }, h('span', {}, 'Übung'), exSel),
+    lastHint,
     h('div', { class: 'field-row' },
       h('label', { class: 'field' }, h('span', {}, 'Gewicht'), weightInp),
       h('label', { class: 'field' }, h('span', {}, 'Wiederholungen'), repsInp),
@@ -277,18 +318,27 @@ async function renderTraining() {
       const weight = parseFloat(weightInp.value);
       const reps = parseInt(repsInp.value, 10);
       if (!(weight > 0) || !(reps > 0)) { alert('Bitte Gewicht und Wiederholungen eingeben.'); return; }
+      const exId = parseInt(exSel.value, 10);
+      // Bestwert VOR diesem Satz merken → Rekord-Erkennung.
+      const prevBest = bestE1rm(enriched.filter((s) => s.exerciseId === exId), FORMULA).value;
+      const newE = round1(e1rm(weight, reps, FORMULA));
       await db.add('sets', {
         workoutId: current.id,
-        exerciseId: parseInt(exSel.value, 10),
+        exerciseId: exId,
         weight, reps,
         rpe: rpeInp.value ? parseFloat(rpeInp.value) : null,
         photo: photoData || null,
         ts: Date.now(),
       });
+      if (newE > prevBest && prevBest > 0) {
+        const ex = eById.get(exId);
+        toast(`🏆 Neuer Rekord bei ${ex ? ex.name : 'Übung'}: ${newE} kg (vorher ${prevBest} kg)`);
+      }
       route();
     } }, '+ Satz speichern'),
   );
   wrap.appendChild(form);
+  prefillFromLast(false);
 
   // Liste der Sätze dieser Einheit
   const listCard = h('div', { class: 'card' }, h('h2', {}, `Sätze dieser Einheit (${sets.length})`));
@@ -650,6 +700,14 @@ function num(v) { const n = parseFloat(v); return isNaN(n) ? null : n; }
 function showPhoto(src) {
   const overlay = h('div', { class: 'overlay', onclick: () => overlay.remove() }, h('img', { src }));
   document.body.appendChild(overlay);
+}
+
+// Kurze Einblendung (z.B. bei neuem Rekord).
+function toast(msg) {
+  const t = h('div', { class: 'toast' }, msg);
+  document.body.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 3800);
 }
 
 // Foto verkleinern, damit die lokale DB nicht überläuft.

@@ -119,3 +119,14 @@ export function weeklyVolumeByCategory(sets, days = 7) {
 export function totalVolume(sets) {
   return sets.reduce((sum, s) => sum + setVolume(s.weight, s.reps), 0);
 }
+
+// Bester Satz einer Menge nach geschätztem 1RM.
+// Liefert {value, set} – value gerundet, set der zugehörige Satz (oder null).
+export function bestE1rm(sets, formula = 'epley') {
+  let best = 0, bestSet = null;
+  for (const s of sets) {
+    const v = e1rm(s.weight, s.reps, formula);
+    if (v > best) { best = v; bestSet = s; }
+  }
+  return { value: round1(best), set: bestSet };
+}
