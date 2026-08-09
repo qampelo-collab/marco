@@ -4,6 +4,7 @@ import { db, exportAll, importAll } from './db.js';
 import { e1rm, progression, dayKey, totalVolume, weeklyVolumeByCategory, round1, bestE1rm } from './calc.js';
 import { buildSuggestions } from './coach.js';
 import { lineChart, barChart } from './charts.js';
+import { extractSetsFromImage, VISION_MODELS, DEFAULT_VISION_MODEL } from './vision.js';
 
 const app = document.getElementById('app');
 let FORMULA = 'epley';
@@ -211,6 +212,9 @@ async function renderTraining() {
     .filter((s) => s.exerciseId === exId)
     .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.ts || 0) - (a.ts || 0))[0] || null;
 
+  const apiKey = await db.getMeta('apiKey', '');
+  const visionModel = await db.getMeta('visionModel', DEFAULT_VISION_MODEL);
+
   // aktuelle (offene) Einheit = zuletzt gewählte im Meta, sonst neu über Button
   let currentId = await db.getMeta('currentWorkout', null);
   let current = currentId ? await db.get('workouts', currentId) : null;
@@ -302,6 +306,63 @@ async function renderTraining() {
   weightInp.addEventListener('input', updateHint);
   repsInp.addEventListener('input', updateHint);
 
+  // --- KI: Werte aus Foto lesen ---
+  const aiResult = h('div', { class: 'hint' }, '');
+  const matchExercise = (name) => {
+    if (!name) return null;
+    const low = name.toLowerCase();
+    let ex = exercises.find((e) => e.name.toLowerCase() === low);
+    if (!ex) ex = exercises.find((e) => e.name.toLowerCase().includes(low) || low.includes(e.name.toLowerCase()));
+    return ex ? ex.id : null;
+  };
+  const aiBtn = h('button', { class: 'btn ghost', onclick: async () => {
+    if (!apiKey) { aiResult.textContent = 'Kein API-Schlüssel – unter „Mehr" hinterlegen.'; return; }
+    if (!photoData) { aiResult.textContent = 'Bitte zuerst ein Foto aufnehmen/auswählen.'; return; }
+    const orig = aiBtn.textContent;
+    aiBtn.textContent = '🤖 Lese Foto …'; aiBtn.disabled = true; aiResult.textContent = '';
+    try {
+      const { sets, note } = await extractSetsFromImage({
+        dataUrl: photoData, apiKey, model: visionModel, exerciseNames: exercises.map((e) => e.name),
+      });
+      if (!sets.length) { aiResult.textContent = 'Keine Werte erkannt' + (note ? ' – ' + note : '.'); return; }
+      if (sets.length === 1) {
+        const s = sets[0];
+        if (s.weight != null) weightInp.value = s.weight;
+        if (s.reps != null) repsInp.value = s.reps;
+        const exId = matchExercise(s.exercise);
+        if (exId) exSel.value = exId;
+        updateHint();
+        aiResult.textContent = `Erkannt: ${s.exercise || '?'} · ${s.weight ?? '?'} kg × ${s.reps ?? '?'}` +
+          (exId ? '' : ' (Übung bitte prüfen)') + (note ? ' · ' + note : '');
+      } else {
+        // Mehrere Sätze: Liste + "alle übernehmen"
+        clear(aiResult);
+        aiResult.appendChild(h('div', {}, `${sets.length} Sätze erkannt:`));
+        for (const s of sets) {
+          aiResult.appendChild(h('div', { class: 'small' },
+            `• ${s.exercise || '?'} — ${s.weight ?? '?'} kg × ${s.reps ?? '?'}`));
+        }
+        aiResult.appendChild(h('button', { class: 'btn primary small', onclick: async () => {
+          let first = true;
+          for (const s of sets) {
+            const exId = matchExercise(s.exercise) || parseInt(exSel.value, 10);
+            await db.add('sets', {
+              workoutId: current.id, exerciseId: exId,
+              weight: s.weight || 0, reps: s.reps || 0, rpe: null,
+              photo: first ? photoData : null, ts: Date.now(),
+            });
+            first = false;
+          }
+          route();
+        } }, `Alle ${sets.length} übernehmen`));
+      }
+    } catch (err) {
+      aiResult.textContent = '⚠️ ' + err.message;
+    } finally {
+      aiBtn.textContent = orig; aiBtn.disabled = false;
+    }
+  } }, '🔍 Aus Foto lesen (KI)');
+
   const form = h('div', { class: 'card' },
     h('h2', {}, 'Satz hinzufügen'),
     h('label', { class: 'field' }, h('span', {}, 'Übung'), exSel),
@@ -314,6 +375,8 @@ async function renderTraining() {
     e1rmHint,
     h('label', { class: 'field' }, h('span', {}, '📷 Foto (optional – Display/Beleg)'), photoInp),
     preview,
+    aiBtn,
+    aiResult,
     h('button', { class: 'btn primary', onclick: async () => {
       const weight = parseFloat(weightInp.value);
       const reps = parseInt(repsInp.value, 10);
@@ -642,6 +705,27 @@ async function renderSettings() {
     h('h2', {}, '1RM-Formel'),
     h('p', { class: 'muted small' }, 'Formel zur Schätzung deiner Maximalkraft.'),
     formulaSel,
+  ));
+
+  // KI: Foto-Auslesen
+  const apiKey = await db.getMeta('apiKey', '');
+  const visionModel = await db.getMeta('visionModel', DEFAULT_VISION_MODEL);
+  const keyInp = h('input', { type: 'password', class: 'inp', placeholder: 'sk-ant-...', value: apiKey });
+  const modelSel = h('select', { class: 'inp' },
+    ...VISION_MODELS.map((m) => h('option', { value: m.id, ...(m.id === visionModel ? { selected: '' } : {}) }, m.label)));
+  modelSel.addEventListener('change', () => db.setMeta('visionModel', modelSel.value));
+  wrap.appendChild(h('div', { class: 'card' },
+    h('h2', {}, '🤖 KI: Werte aus Foto lesen'),
+    h('p', { class: 'muted small' }, 'Optional. Mit einem Anthropic API-Schlüssel liest die App Gewicht/Wiederholungen automatisch aus deinen Fotos aus. ' +
+      'Der Schlüssel bleibt lokal auf diesem Gerät. Beim Auslesen wird das jeweilige Foto an die Anthropic-API gesendet.'),
+    h('label', { class: 'field' }, h('span', {}, 'Anthropic API-Schlüssel'), keyInp),
+    h('label', { class: 'field' }, h('span', {}, 'Modell'), modelSel),
+    h('button', { class: 'btn primary', onclick: async () => {
+      await db.setMeta('apiKey', keyInp.value.trim());
+      await db.setMeta('visionModel', modelSel.value);
+      toast('KI-Einstellungen gespeichert.');
+    } }, 'Speichern'),
+    h('p', { class: 'muted small' }, 'Schlüssel erstellen unter console.anthropic.com. Ohne Schlüssel bleibt die App voll nutzbar (manuelle Eingabe).'),
   ));
 
   // Backup
