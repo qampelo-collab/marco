@@ -1,4 +1,4 @@
-/* Kraft-Tracker — mobile-first, dunkles Theme */
+/* Kraft-Tracker — mobile-first, umschaltbares Theme */
 :root {
   --bg: #0f172a;
   --bg-card: #1e293b;
@@ -9,7 +9,19 @@
   --primary: #4ade80;
   --primary-ink: #052e16;
   --danger: #f87171;
-  --radius: 14px;
+  --radius: 16px;
+  --shadow: 0 2px 12px rgba(0,0,0,0.28);
+}
+
+/* Helles Theme */
+:root[data-theme="light"] {
+  --bg: #f4f6fb;
+  --bg-card: #ffffff;
+  --bg-elev: #eef2f7;
+  --text: #0f172a;
+  --muted: #64748b;
+  --border: #e2e8f0;
+  --shadow: 0 2px 10px rgba(15,23,42,0.08);
 }
 
 * { box-sizing: border-box; }
@@ -26,7 +38,7 @@ body {
 /* Topbar */
 .topbar {
   position: sticky; top: 0; z-index: 20;
-  background: rgba(15, 23, 42, 0.92);
+  background: var(--bg-card);
   backdrop-filter: blur(8px);
   padding: 14px 16px calc(14px);
   padding-top: calc(14px + env(safe-area-inset-top));
@@ -35,7 +47,7 @@ body {
 .brand { font-weight: 700; font-size: 18px; }
 
 /* Layout */
-#app { padding: 16px 16px 96px; max-width: 720px; margin: 0 auto; }
+#app { padding: 16px 16px calc(120px + env(safe-area-inset-bottom)); max-width: 720px; margin: 0 auto; }
 .view { display: flex; flex-direction: column; gap: 16px; }
 h1 { font-size: 24px; margin: 4px 0 0; }
 h2 { font-size: 16px; margin: 0 0 12px; }
@@ -47,6 +59,7 @@ h2 { font-size: 16px; margin: 0 0 12px; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
+  box-shadow: var(--shadow);
 }
 .card.error { border-color: var(--danger); color: var(--danger); }
 .muted { color: var(--muted); }
@@ -109,6 +122,17 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .row-item:first-of-type { border-top: none; }
 .chev { color: var(--muted); font-size: 20px; }
 .row-actions { display: flex; align-items: center; gap: 8px; }
+
+/* Theme-Auswahl (Akzentfarben) */
+.swatches { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+.swatch {
+  width: 38px; height: 38px; border-radius: 50%; cursor: pointer;
+  border: 3px solid transparent; padding: 0;
+}
+.swatch.active { border-color: var(--text); }
+.seg { display: flex; gap: 8px; }
+.seg .btn { margin-top: 0; }
+.seg .btn.on { background: var(--primary); color: var(--primary-ink); border-color: var(--primary); }
 .cat-head { display: flex; align-items: center; gap: 8px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 
@@ -138,9 +162,10 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 /* Back link */
 .back { color: var(--muted); text-decoration: none; font-size: 14px; }
 
-/* FAB */
+/* FAB — schwebt sicher über der unteren Leiste (inkl. Safe-Area) */
 .fab {
-  position: fixed; right: 16px; bottom: 84px; z-index: 15;
+  position: fixed; right: 16px; z-index: 15;
+  bottom: calc(78px + env(safe-area-inset-bottom));
   width: auto; padding: 14px 20px; border-radius: 999px;
   background: var(--primary); color: var(--primary-ink);
   border: none; font-weight: 700; font-size: 15px;
@@ -150,7 +175,7 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 /* Bottom nav */
 .bottomnav {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
-  display: flex; background: rgba(15,23,42,0.96);
+  display: flex; background: var(--bg-card);
   backdrop-filter: blur(8px); border-top: 1px solid var(--border);
   padding-bottom: env(safe-area-inset-bottom);
 }

@@ -6,6 +6,7 @@ import { buildSuggestions } from './coach.js';
 import { lineChart, barChart } from './charts.js';
 import { extractSetsFromImage, VISION_MODELS, DEFAULT_VISION_MODEL } from './vision.js';
 import { PLAN, installPlan, parseTargetSets } from './plan.js';
+import { applyTheme, ACCENTS, DEFAULT_ACCENT, DEFAULT_THEME } from './theme.js';
 
 const app = document.getElementById('app');
 let FORMULA = 'epley';
@@ -70,6 +71,7 @@ const routes = {
 
 export async function initUI() {
   FORMULA = await db.getMeta('formula', 'epley');
+  applyTheme(await db.getMeta('theme', DEFAULT_THEME), await db.getMeta('accent', DEFAULT_ACCENT));
   window.addEventListener('hashchange', route);
   route();
 }
@@ -781,6 +783,27 @@ async function renderActivity() {
 async function renderSettings() {
   const wrap = h('div', { class: 'view' });
   wrap.appendChild(h('h1', {}, 'Mehr'));
+
+  // Aussehen: Theme + Akzentfarbe
+  const curTheme = await db.getMeta('theme', DEFAULT_THEME);
+  const curAccent = await db.getMeta('accent', DEFAULT_ACCENT);
+  const darkBtn = h('button', { class: 'btn ghost' + (curTheme !== 'light' ? ' on' : '') }, '🌙 Dunkel');
+  const lightBtn = h('button', { class: 'btn ghost' + (curTheme === 'light' ? ' on' : '') }, '☀️ Hell');
+  darkBtn.onclick = async () => { await db.setMeta('theme', 'dark'); applyTheme('dark', await db.getMeta('accent', DEFAULT_ACCENT)); route(); };
+  lightBtn.onclick = async () => { await db.setMeta('theme', 'light'); applyTheme('light', await db.getMeta('accent', DEFAULT_ACCENT)); route(); };
+  const swatches = h('div', { class: 'swatches' });
+  for (const [key, a] of Object.entries(ACCENTS)) {
+    swatches.appendChild(h('button', {
+      class: 'swatch' + (key === curAccent ? ' active' : ''),
+      style: `background:${a.primary}`, title: a.name,
+      onclick: async () => { await db.setMeta('accent', key); applyTheme(await db.getMeta('theme', DEFAULT_THEME), key); route(); },
+    }));
+  }
+  wrap.appendChild(h('div', { class: 'card' },
+    h('h2', {}, '🎨 Aussehen'),
+    h('label', { class: 'field' }, h('span', {}, 'Modus'), h('div', { class: 'seg' }, darkBtn, lightBtn)),
+    h('label', { class: 'field' }, h('span', {}, 'Akzentfarbe'), swatches),
+  ));
 
   // Weitere Bereiche
   wrap.appendChild(h('div', { class: 'card' },
