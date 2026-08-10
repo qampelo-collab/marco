@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v36';
+const APP_VERSION = 'v37';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -1092,17 +1092,37 @@ async function renderExerciseDetail(id) {
     lineChart(volSeries, { color: '#60a5fa' }),
   ));
 
-  // Historie
-  const hist = h('div', { class: 'card' }, h('h2', {}, 'Historie'));
-  const sorted = [...sets].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.ts || 0) - (a.ts || 0));
-  for (const s of sorted.slice(0, 50)) {
-    hist.appendChild(h('div', { class: 'set-item' },
-      s.photo ? h('img', { class: 'set-thumb', src: s.photo, onclick: () => showPhoto(s.photo) }) : h('div', { class: 'set-thumb empty' }, '—'),
-      h('div', { class: 'set-main' },
-        h('strong', {}, `${s.weight} kg × ${s.reps}`),
-        h('div', { class: 'muted small' }, `${fmtDate(s.date)} · e1RM ${round1(e1rm(s.weight, s.reps, FORMULA))} kg${s.rpe ? ' · RPE ' + s.rpe : ''}`),
+  // Historie – nach Trainingstag gruppiert (neueste zuerst), je Tag die Sätze.
+  const hist = h('div', { class: 'card' }, h('h2', {}, tr('Historie', 'History')));
+  const byDay = new Map();
+  for (const s of sets) {
+    const k = s.date || (s.ts ? dayKey(s.ts) : '—');
+    if (!byDay.has(k)) byDay.set(k, []);
+    byDay.get(k).push(s);
+  }
+  const days = [...byDay.keys()].sort((a, b) => b.localeCompare(a)).slice(0, 30);
+  for (const d of days) {
+    const daySets = byDay.get(d).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    const best = bestE1rm(daySets, FORMULA).value;
+    const group = h('div', { class: 'ex-group' },
+      h('div', { class: 'ex-group-head' },
+        h('strong', {}, `${weekdayShort(d)}, ${fmtDate(d)}`),
+        h('span', { class: 'muted small' }, `${daySets.length} ${tr('Sätze', 'sets')}${best ? ' · e1RM ' + best + ' kg' : ''}`),
       ),
-    ));
+    );
+    daySets.forEach((s, i) => {
+      const line = h('div', { class: 'set-line' },
+        h('span', { class: 'set-no' }, `${tr('Satz', 'Set')} ${i + 1}`),
+        h('strong', { class: 'set-load' }, `${s.weight} kg × ${s.reps}`),
+      );
+      const badge = tendBadge(s.tendency);
+      if (badge) line.appendChild(badge);
+      group.appendChild(h('div', { class: 'set-item' },
+        h('div', { class: 'set-main' }, line,
+          h('div', { class: 'muted small' }, `e1RM ${round1(e1rm(s.weight, s.reps, FORMULA))} kg${s.rpe ? ' · RPE ' + s.rpe : ''}`)),
+      ));
+    });
+    hist.appendChild(group);
   }
   wrap.appendChild(hist);
   return wrap;
