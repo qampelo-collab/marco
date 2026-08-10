@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v21';
+const APP_VERSION = 'v22';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -498,7 +498,6 @@ async function renderTraining() {
     ...exercises.map((e) => h('option', { value: e.id }, `${e.name} (${CAT_LABEL[e.category] || e.category})`)));
   const weightInp = h('input', { type: 'number', step: '0.5', inputmode: 'decimal', class: 'inp', placeholder: tr('kg (0 = Körpergewicht)', 'kg (0 = bodyweight)') });
   const repsInp = h('input', { type: 'number', step: '1', inputmode: 'numeric', class: 'inp', placeholder: 'Wdh.' });
-  const rpeInp = h('input', { type: 'number', step: '0.5', min: '1', max: '10', inputmode: 'decimal', class: 'inp', placeholder: 'RPE (opt.)' });
   const photoInp = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'inp-file' });
   const preview = h('div', { class: 'photo-preview' });
   let photoData = null;
@@ -602,7 +601,6 @@ async function renderTraining() {
     h('div', { class: 'field-row' },
       h('label', { class: 'field' }, h('span', {}, 'Gewicht'), weightInp),
       h('label', { class: 'field' }, h('span', {}, 'Wiederholungen'), repsInp),
-      h('label', { class: 'field' }, h('span', {}, 'RPE'), rpeInp),
     ),
     e1rmHint,
     h('label', { class: 'field' }, h('span', {}, tr('Tendenz (optional)', 'Tendency (optional)')), addTend.el),
@@ -623,7 +621,7 @@ async function renderTraining() {
         workoutId: current.id,
         exerciseId: exId,
         weight, reps,
-        rpe: rpeInp.value ? parseFloat(rpeInp.value) : null,
+        rpe: null,
         tendency: addTend.get(),
         photo: photoData || null,
         ts: Date.now(),
