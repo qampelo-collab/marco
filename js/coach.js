@@ -1,7 +1,8 @@
-// coach.js — Regelbasierte Vorschläge ("was ergänzt dein Training sinnvoll?").
-// Ausgabe: Liste von {type, level, title, text}. level: 'info' | 'tip' | 'warn' | 'good'
+// coach.js — nur RELEVANTE Signale: Risiken, Dysbalancen, Fehltraining.
+// Bewusst knapp und priorisiert (max. 3 Hinweise), damit Wichtiges nicht
+// in generischem Coaching untergeht. Ausgabe: [{type, level, title, text}].
 
-import { progression, weeklyVolumeByCategory, dayKey, round1 } from './calc.js';
+import { progression, weeklyVolumeByCategory, round1 } from './calc.js';
 import { getLang } from './i18n.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -9,159 +10,102 @@ const en = () => getLang() === 'en';
 const pick = (de, enStr) => (en() ? enStr : de);
 
 export function buildSuggestions({ enrichedSets, exercises, body, nutrition, activity, formula = 'epley' }) {
-  const out = [];
+  const cand = []; // {p (Priorität), level, title, text}
   const now = Date.now();
-
-  // 1) Fortschritt / Plateau je Übung.
-  // Beurteilt wird das BESTE geschätzte 1RM in der jüngeren vs. der früheren
-  // Trainingshälfte. Das ist robuster als eine einzelne Trendlinie, die bei
-  // wechselnden Wiederholungsbereichen/Trainingsblöcken fälschlich flach
-  // wirken kann, obwohl die Höchstleistung klar gestiegen ist.
   const byExercise = groupBy(enrichedSets, (s) => s.exerciseId);
-  for (const [exId, sets] of byExercise) {
+
+  // 1) Dysbalance Push/Pull (Verletzungsrisiko) — letzte 7 Tage.
+  const vol = weeklyVolumeByCategory(enrichedSets, 7);
+  const push = vol.push || 0, pull = vol.pull || 0, legs = vol.legs || 0;
+  if (pull > 0 && push > pull * 1.8) {
+    cand.push({ p: 95, level: 'warn',
+      title: pick('Dysbalance: zu wenig Pull', 'Imbalance: too little pull'),
+      text: pick('Diese Woche deutlich mehr Push- als Pull-Volumen – auf Dauer Schulterrisiko. Mehr Rudern/Klimmzüge.',
+        'Much more push than pull volume this week — shoulder risk over time. Add rows/pull-ups.') });
+  } else if (push > 0 && pull > push * 1.8) {
+    cand.push({ p: 90, level: 'warn',
+      title: pick('Dysbalance: zu wenig Push', 'Imbalance: too little push'),
+      text: pick('Pull dominiert klar. Ein zusätzlicher Push-Tag bringt die Balance zurück.',
+        'Pull clearly dominates. An extra push day restores balance.') });
+  }
+  if (push + pull > 0 && legs < (push + pull) * 0.3) {
+    cand.push({ p: 70, level: 'tip',
+      title: pick('Legs vernachlässigt', 'Legs neglected'),
+      text: pick('Bein-Volumen niedrig gegenüber dem Oberkörper. Squats/Kreuzheben einplanen.',
+        'Leg volume low vs. upper body. Add squats/deadlifts.') });
+  }
+
+  // 2) Rückgang oder Plateau — nur der auffälligste Lift (bestes e1RM
+  //    jüngere vs. frühere Trainingshälfte).
+  const stalls = [];
+  for (const [, sets] of byExercise) {
     const prog = progression(sets, formula);
-    if (prog.sessions < 4) continue;                 // erst ab genug Historie beurteilen
-    const name = sets[0].exerciseName || pick('Übung', 'exercise');
-    const series = prog.series;                       // pro Tag bestes e1RM, aufsteigend
+    if (prog.sessions < 4) continue;
+    const series = prog.series;
     const half = Math.floor(series.length / 2);
     const earlierBest = Math.max(...series.slice(0, half).map((p) => p.value));
     const recentBest = Math.max(...series.slice(half).map((p) => p.value));
-    const gain = round1(recentBest - earlierBest);
-
-    if (recentBest > earlierBest + 0.5) {             // Höchstleistung gestiegen → Fortschritt
-      out.push({ type: 'progress', level: 'good',
-        title: pick(`Fortschritt: ${name}`, `Progress: ${name}`),
-        text: pick(
-          `Dein bestes geschätztes 1RM ist von ${earlierBest} auf ${recentBest} kg gestiegen (+${gain} kg). Weiter so – Gewicht/Wdh. Schritt für Schritt steigern.`,
-          `Your best estimated 1RM rose from ${earlierBest} to ${recentBest} kg (+${gain} kg). Keep it up — add weight/reps step by step.`),
-      });
-    } else if (recentBest < earlierBest - 0.5) {      // zuletzt schwächer als früher
-      out.push({ type: 'regress', level: 'tip',
-        title: pick(`${name}: zuletzt schwächer`, `${name}: recently weaker`),
-        text: pick(
-          `Bestes e1RM zuletzt ${recentBest} kg gegenüber ${earlierBest} kg früher (${gain} kg). ` +
-          `Oft nur Tagesform/Erholung – im Blick behalten, ggf. Schlaf/Ernährung/Deload prüfen.`,
-          `Best e1RM recently ${recentBest} kg vs ${earlierBest} kg earlier (${gain} kg). ` +
-          `Often just recovery/day-to-day — keep an eye on it, check sleep/nutrition/deload.`),
-      });
-    } else {                                          // Höchstleistung stagniert → echtes Plateau
-      out.push({ type: 'plateau', level: 'warn',
-        title: pick(`Plateau bei ${name}?`, `Plateau on ${name}?`),
-        text: pick(
-          `Dein bestes geschätztes 1RM bewegt sich seit ${prog.sessions} Einheiten um ${recentBest} kg. ` +
-          `Idee: Deload-Woche, Variation der Übung oder Wiederholungsbereich wechseln.`,
-          `Your best estimated 1RM has hovered around ${recentBest} kg for ${prog.sessions} sessions. ` +
-          `Idea: a deload week, an exercise variation, or switch the rep range.`),
-      });
+    const name = sets[0].exerciseName || pick('Übung', 'exercise');
+    if (recentBest < earlierBest - 0.5) {
+      stalls.push({ kind: 'regress', name, earlierBest, recentBest, gap: earlierBest - recentBest });
+    } else if (recentBest <= earlierBest + 0.5) {
+      stalls.push({ kind: 'plateau', name, recentBest, sessions: prog.sessions });
     }
   }
-
-  // 2) Progressive Overload
-  for (const [exId, sets] of byExercise) {
-    const sorted = [...sets].sort((a, b) => new Date(b.date) - new Date(a.date));
-    const last = sorted[0];
-    if (last && last.reps >= 12 && last.weight > 0) {
-      out.push({ type: 'overload', level: 'tip',
-        title: pick(`Mehr Gewicht bei ${last.exerciseName}?`, `More weight on ${last.exerciseName}?`),
-        text: pick(
-          `Zuletzt ${last.reps} Wdh. bei ${last.weight} kg geschafft. ` +
-          `Wenn die Form sauber war: nächstes Mal ~2,5–5 % mehr Gewicht, dafür weniger Wdh.`,
-          `Last time you did ${last.reps} reps at ${last.weight} kg. ` +
-          `If your form was clean: next time ~2.5–5% more weight and fewer reps.`),
-      });
-    }
-  }
-
-  // 3) Muskelgruppen-Balance
-  const vol = weeklyVolumeByCategory(enrichedSets, 7);
-  const push = vol.push || 0, pull = vol.pull || 0, legs = vol.legs || 0;
-  if (push + pull + legs > 0) {
-    if (pull > 0 && push > pull * 1.8) {
-      out.push({ type: 'balance', level: 'tip',
-        title: pick('Balance: mehr Pull', 'Balance: more pulling'),
-        text: pick(
-          'Diese Woche deutlich mehr Druck- als Zugvolumen. Für gesunde Schultern: mehr Rudern/Klimmzüge einplanen.',
-          'Much more pushing than pulling volume this week. For healthy shoulders: add more rows/pull-ups.') });
-    }
-    if (push > 0 && pull > push * 1.8) {
-      out.push({ type: 'balance', level: 'tip',
-        title: pick('Balance: mehr Push', 'Balance: more pushing'),
-        text: pick(
-          'Zugvolumen dominiert. Ein zusätzlicher Druck-Tag (Bank/Schulter) bringt die Balance zurück.',
-          'Pulling volume dominates. An extra push day (bench/shoulders) restores the balance.') });
-    }
-    if (legs < (push + pull) * 0.3) {
-      out.push({ type: 'balance', level: 'tip',
-        title: pick('Legs nicht vergessen', 'Don’t forget legs'),
-        text: pick(
-          'Beinvolumen ist gering im Vergleich zum Oberkörper. Kniebeugen/Kreuzheben/Beinpresse ergänzen.',
-          'Leg volume is low compared to upper body. Add squats/deadlifts/leg press.') });
-    }
-  }
-
-  // 4) Protein pro kg Körpergewicht
-  const latestBody = latestBy(body, 'date');
-  const latestNut = latestBy(nutrition, 'date');
-  if (latestBody?.weight && latestNut?.protein) {
-    const perKg = Math.round((latestNut.protein / latestBody.weight) * 100) / 100;
-    if (perKg < 1.6) {
-      const lo = Math.round(latestBody.weight * 1.6), hi = Math.round(latestBody.weight * 2.2);
-      out.push({ type: 'protein', level: 'tip',
-        title: pick('Mehr Protein für Muskelaufbau', 'More protein for muscle growth'),
-        text: pick(
-          `Zuletzt ${perKg} g Protein/kg. Für Muskelaufbau werden oft 1,6–2,2 g/kg empfohlen ` +
-          `(≈ ${lo}–${hi} g/Tag bei ${latestBody.weight} kg).`,
-          `Last ${perKg} g protein/kg. For muscle growth 1.6–2.2 g/kg is often recommended ` +
-          `(≈ ${lo}–${hi} g/day at ${latestBody.weight} kg).`) });
+  stalls.sort((a, b) => (b.kind === 'regress') - (a.kind === 'regress') || (b.gap || 0) - (a.gap || 0) || (b.sessions || 0) - (a.sessions || 0));
+  if (stalls[0]) {
+    const s = stalls[0];
+    if (s.kind === 'regress') {
+      cand.push({ p: 88, level: 'warn',
+        title: pick(`${s.name}: zuletzt schwächer`, `${s.name}: recently weaker`),
+        text: pick(`Bestes 1RM von ${s.earlierBest} auf ${s.recentBest} kg gefallen. Erholung/Deload prüfen.`,
+          `Best 1RM dropped from ${s.earlierBest} to ${s.recentBest} kg. Check recovery/deload.`) });
     } else {
-      out.push({ type: 'protein', level: 'good',
-        title: pick('Proteinzufuhr im Zielbereich', 'Protein intake on target'),
-        text: pick(`${perKg} g/kg – solide Basis für Muskelaufbau.`,
-                   `${perKg} g/kg — a solid base for muscle growth.`) });
+      cand.push({ p: 72, level: 'tip',
+        title: pick(`${s.name}: Plateau`, `${s.name}: plateau`),
+        text: pick(`Bestes 1RM seit ${s.sessions} Einheiten bei ~${s.recentBest} kg. Deload oder Wdh.-Bereich wechseln.`,
+          `Best 1RM stuck around ${s.recentBest} kg for ${s.sessions} sessions. Deload or switch rep range.`) });
     }
   }
 
-  // 5) Schritte / NEAT
-  const recentSteps = (activity || [])
-    .filter((a) => a.steps > 0 && (now - new Date(a.date).getTime()) < 7 * DAY)
-    .map((a) => a.steps);
-  if (recentSteps.length) {
-    const avg = Math.round(recentSteps.reduce((a, b) => a + b, 0) / recentSteps.length);
-    if (avg < 7000) {
-      out.push({ type: 'steps', level: 'tip',
-        title: pick('Mehr Alltagsbewegung', 'More daily movement'),
-        text: pick(
-          `Ø ${avg.toLocaleString('de-DE')} Schritte/Tag. Ein Ziel um 8.000–10.000 unterstützt Regeneration und Kaloriendefizit.`,
-          `Avg ${avg.toLocaleString('en-US')} steps/day. A target around 8,000–10,000 supports recovery and a calorie deficit.`) });
+  // 3) Zuvor regelmäßiger Lift lange nicht trainiert — nur der überfälligste.
+  let overdue = null;
+  for (const [, sets] of byExercise) {
+    if (sets.length < 3) continue;
+    const last = [...sets].sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+    const days = Math.round((now - new Date(last.date).getTime()) / DAY);
+    if (days > 14 && (!overdue || days > overdue.days)) overdue = { name: last.exerciseName, days };
+  }
+  if (overdue) {
+    cand.push({ p: 60, level: 'tip',
+      title: pick(`${overdue.name} lange nicht trainiert`, `${overdue.name} not trained for a while`),
+      text: pick(`Zuletzt vor ${overdue.days} Tagen – wieder einplanen, sonst geht Fortschritt verloren.`,
+        `Last done ${overdue.days} days ago — plan it back in before progress fades.`) });
+  }
+
+  // 4) Protein zu niedrig (nur wenn Gewicht & Protein getrackt sind).
+  const lb = latestBy(body, 'date'), ln = latestBy(nutrition, 'date');
+  if (lb?.weight && ln?.protein) {
+    const perKg = ln.protein / lb.weight;
+    if (perKg < 1.6) {
+      cand.push({ p: 66, level: 'tip',
+        title: pick('Protein zu niedrig', 'Protein too low'),
+        text: pick(`Zuletzt ${round1(perKg)} g/kg. Für Muskelaufbau ~1,6–2,2 g/kg (${Math.round(lb.weight * 1.6)}–${Math.round(lb.weight * 2.2)} g/Tag).`,
+          `Last ${round1(perKg)} g/kg. For growth ~1.6–2.2 g/kg (${Math.round(lb.weight * 1.6)}–${Math.round(lb.weight * 2.2)} g/day).`) });
     }
   }
 
-  // 6) Trainingsfrequenz
-  for (const [exId, sets] of byExercise) {
-    const sorted = [...sets].sort((a, b) => new Date(b.date) - new Date(a.date));
-    const last = sorted[0];
-    const daysAgo = Math.round((now - new Date(last.date).getTime()) / DAY);
-    if (daysAgo > 14) {
-      out.push({ type: 'frequency', level: 'info',
-        title: pick(`${last.exerciseName} länger nicht trainiert`, `${last.exerciseName} not trained for a while`),
-        text: pick(
-          `Zuletzt vor ${daysAgo} Tagen. Wieder einplanen, um den Fortschritt zu halten.`,
-          `Last done ${daysAgo} days ago. Plan it back in to keep your progress.`) });
-    }
-  }
+  // Nach Priorität sortieren, nur die Top 3 – der Rest ist Rauschen.
+  cand.sort((a, b) => b.p - a.p);
+  const top = cand.slice(0, 3).map(({ level, title, text }) => ({ type: 'tip', level, title, text }));
 
-  // 7) Körpergewicht aktualisieren
-  if (!latestBody || (now - new Date(latestBody.date).getTime()) > 7 * DAY) {
-    out.push({ type: 'body', level: 'info',
-      title: pick('Körpergewicht aktualisieren?', 'Update body weight?'),
-      text: pick(
-        'Länger kein Gewicht/Maß eingetragen. Ein wöchentlicher Wert macht Trends aussagekräftiger.',
-        'No weight/measurement logged for a while. A weekly value makes trends more meaningful.') });
+  if (!top.length) {
+    return [{ type: 'info', level: 'good',
+      title: pick('Alles im grünen Bereich', 'All good'),
+      text: pick('Keine Auffälligkeiten – Balance, Frequenz und Progression passen. Weiter so.',
+        'Nothing to flag — balance, frequency and progression look solid. Keep it up.') }];
   }
-
-  const order = { warn: 0, tip: 1, good: 2, info: 3 };
-  out.sort((a, b) => order[a.level] - order[b.level]);
-  return out;
+  return top;
 }
 
 function groupBy(arr, keyFn) {

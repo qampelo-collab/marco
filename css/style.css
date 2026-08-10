@@ -258,6 +258,8 @@ details.manual-details > summary {
 details.manual-details > summary::-webkit-details-marker { display: none; }
 
 /* Ziele */
+.goal-progress { font-size: 20px; margin: 4px 0 2px; }
+.goal-target { color: var(--primary); }
 .goal { padding: 10px 0; border-top: 1px solid var(--border); }
 .goal:first-of-type { border-top: none; }
 .goal-add { margin-top: 10px; }

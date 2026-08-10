@@ -9,7 +9,7 @@ import { PLAN, installPlan, parseTargetSets } from './plan.js';
 import { applyTheme, ACCENTS, DEFAULT_ACCENT, DEFAULT_THEME } from './theme.js';
 import { applyI18n, getLang, setLang, detectLang, L } from './i18n.js';
 import { startRest, unlockAudio } from './timer.js';
-import { forecastValue, weeksToTarget, milestoneProgress } from './forecast.js';
+import { forecastValue, weeksToTarget, milestoneProgress, nextMilestone } from './forecast.js';
 import { parseRestSeconds } from './calc.js';
 
 const app = document.getElementById('app');
@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v35';
+const APP_VERSION = 'v36';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -211,7 +211,7 @@ async function renderDashboard() {
   wrap.appendChild(h('div', { class: 'card' },
     h('div', { class: 'row-item', style: 'border-top:none', onclick: () => go('#fortschritt') },
       h('div', {}, h('strong', {}, '📊 ' + tr('Fortschritt', 'Progress')),
-        h('div', { class: 'muted small' }, tr('Prognose & Milestones', 'Forecast & milestones'))),
+        h('div', { class: 'muted small' }, tr('So nah bist du an deinen Zielen', 'How close you are to your goals'))),
       h('span', { class: 'chev' }, '›'))));
 
   // Top-Übungen: Progression
@@ -1325,48 +1325,48 @@ async function renderProgress() {
   ));
   wrap.appendChild(goalsCard);
 
+  // ----- Automatische Ziele je Übung (Meilenstein aus deinen Bestwerten) -----
   const items = [...byEx.entries()]
-    .map(([id, sets]) => ({ name: sets[0].exerciseName, prog: progById.get(id) }))
-    .filter((p) => p.prog.sessions >= 2)
-    .sort((a, b) => b.prog.current - a.prog.current);
+    .map(([id, sets]) => ({ id, name: sets[0].exerciseName, sets, prog: progById.get(id), best: bestE1rm(sets, FORMULA).value }))
+    .filter((p) => p.prog.sessions >= 3 && p.best > 0)
+    .sort((a, b) => b.sets.length - a.sets.length)   // meist trainierte = relevanteste zuerst
+    .slice(0, 6);
 
   if (!items.length) {
     wrap.appendChild(h('div', { class: 'card' }, h('p', { class: 'muted' },
-      tr('Erfasse mind. 2 Einheiten pro Übung – dann erscheinen hier Prognosen & Milestones.',
-         'Log at least 2 sessions per exercise — then forecasts & milestones appear here.'))));
+      tr('Erfasse mind. 3 Einheiten pro Übung – dann setzt dir die App hier automatisch Ziele.',
+         'Log at least 3 sessions per exercise — then the app sets automatic goals here.'))));
     return wrap;
   }
 
-  // Push-Karte: Fokus auf die Übung mit flachstem Trend
-  const focus = [...items].sort((a, b) => a.prog.slopePerWeek - b.prog.slopePerWeek)[0];
-  wrap.appendChild(h('div', { class: 'card' },
-    h('h2', {}, '🔥 ' + tr('Dein Push', 'Your push')),
-    h('div', { class: 'sug-text' }, focus.prog.slopePerWeek > 0.05
-      ? tr(`Größter Hebel gerade: ${focus.name} (Trend +${focus.prog.slopePerWeek} kg/Woche). Bleib dran!`,
-           `Biggest lever right now: ${focus.name} (trend +${focus.prog.slopePerWeek} kg/week). Keep going!`)
-      : tr(`${focus.name} stagniert – hier liegt dein größtes Potenzial. Nächstes Mal +1 Wdh oder +2,5 kg.`,
-           `${focus.name} has stalled — your biggest upside. Next time +1 rep or +2.5 kg.`)),
-  ));
+  wrap.appendChild(h('p', { class: 'muted small' }, tr(
+    'Die App setzt dir je Übung automatisch das nächste Ziel (Meilenstein) auf Basis deiner Bestwerte. So siehst du auf einen Blick, wie nah du dran bist.',
+    'For each exercise the app sets the next goal (milestone) from your best values — so you see at a glance how close you are.')));
 
   for (const it of items) {
     const p = it.prog;
-    const ms = milestoneProgress(p.current);
-    const eta = weeksToTarget(p, ms.next);
-    const f12 = forecastValue(p, 12);
-    const etaTxt = eta == null ? ''
-      : eta === 0 ? ' (' + tr('erreichbar', 'reachable') + ')'
-      : ' (~' + eta + ' ' + tr('Wochen', 'weeks') + ')';
+    const best = it.best;
+    const target = nextMilestone(best);
+    const ms = milestoneProgress(best);
+    const reached = best >= target;
+    const slope = p.slopePerWeek;
+    const etaWeeks = slope > 0 ? Math.ceil((target - best) / slope) : null;
+    const etaTxt = reached
+      ? tr('Nächstes Ziel erreicht 🎉 – neues folgt automatisch', 'Next goal reached 🎉 — a new one follows automatically')
+      : etaWeeks != null
+        ? tr(`Bei aktuellem Tempo: Ziel in ~${etaWeeks} Wochen`, `At current pace: goal in ~${etaWeeks} weeks`)
+        : tr('Trend gerade flach – hier lohnt sich der Fokus', 'Trend flat right now — worth focusing here');
     wrap.appendChild(h('div', { class: 'card' },
-      h('div', { class: 'chart-head' }, h('h2', {}, it.name),
-        h('span', { class: p.slopePerWeek >= 0 ? 'delta up' : 'delta down' },
-          (p.slopePerWeek >= 0 ? '+' : '') + p.slopePerWeek + ' kg/' + tr('Wo.', 'wk'))),
-      h('div', { class: 'kpi-grid' },
-        kpi(p.current + ' kg', tr('Aktuell (1RM)', 'Current (1RM)')),
-        kpi(f12 != null ? f12 + ' kg' : '–', tr('in 12 Wochen', 'in 12 weeks')),
-      ),
-      h('div', { class: 'muted small', style: 'margin-top:8px' },
-        tr('Nächster Meilenstein', 'Next milestone') + `: ${ms.next} kg` + etaTxt),
-      h('div', { class: 'pbar' }, h('i', { style: `width:${ms.pct}%` })),
+      h('div', { class: 'chart-head' },
+        h('h2', {}, it.name),
+        h('span', { class: slope >= 0 ? 'delta up' : 'delta down' },
+          (slope >= 0 ? '+' : '') + slope + ' kg/' + tr('Wo.', 'wk'))),
+      h('div', { class: 'goal-progress' },
+        h('strong', {}, `${best} kg`),
+        h('span', { class: 'muted' }, ' → '),
+        h('strong', { class: 'goal-target' }, `${target} kg`)),
+      h('div', { class: 'pbar' }, h('i', { style: `width:${reached ? 100 : ms.pct}%` })),
+      h('div', { class: 'muted small', style: 'margin-top:6px' }, etaTxt),
     ));
   }
   return wrap;
