@@ -136,7 +136,18 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .cat-head { display: flex; align-items: center; gap: 8px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 
-/* Sets */
+/* Sets — nach Übung gruppiert */
+.ex-group { margin-top: 16px; }
+.ex-group:first-of-type { margin-top: 4px; }
+.ex-group-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  padding-bottom: 6px; margin-bottom: 2px; border-bottom: 1px solid var(--border);
+}
+.ex-group-head strong { font-size: 16px; }
+.set-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.set-no { color: var(--muted); font-size: 13px; min-width: 52px; }
+.set-load { font-size: 15px; }
+
 .set-item {
   display: flex; align-items: center; gap: 12px;
   padding: 10px 0; border-top: 1px solid var(--border);

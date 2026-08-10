@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v17';
+const APP_VERSION = 'v18';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -603,31 +603,51 @@ async function renderTraining() {
   wrap.appendChild(form);
   prefillFromLast(false);
 
-  // Liste der Sätze dieser Einheit — jeder Satz ist nachträglich editierbar
-  // (Übung/Gewicht/Wdh.), ohne dass eine Pause gestartet wird.
+  // Liste der Sätze dieser Einheit — nach Übung gruppiert (wie auf deinen
+  // Notizen): Übung im Vordergrund, darunter Satz für Satz mit Gewicht × Wdh.
+  // Jeder Satz bleibt bearbeitbar, ohne dass dabei eine Pause gestartet wird.
   const listCard = h('div', { class: 'card' }, h('h2', {}, `Sätze dieser Einheit (${sets.length})`));
   if (sets.length === 0) {
     listCard.appendChild(h('p', { class: 'muted' }, 'Noch keine Sätze erfasst.'));
   } else {
-    for (const s of sets) {
-      listCard.appendChild(makeSetRow(s));
+    // Nach Übung gruppieren (Reihenfolge = erste Ausführung), Sätze aufsteigend.
+    const asc = [...sets].sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    const groups = new Map();
+    for (const s of asc) {
+      if (!groups.has(s.exerciseId)) groups.set(s.exerciseId, []);
+      groups.get(s.exerciseId).push(s);
+    }
+    for (const [exId, exSets] of groups) {
+      const ex = eById.get(exId);
+      const best = bestE1rm(exSets, FORMULA).value;
+      const group = h('div', { class: 'ex-group' },
+        h('div', { class: 'ex-group-head' },
+          h('strong', {}, ex ? ex.name : '?'),
+          h('span', { class: 'muted small' }, `${exSets.length} ${tr('Sätze', 'sets')}${best ? ' · e1RM ' + best + ' kg' : ''}`),
+        ),
+      );
+      exSets.forEach((s, i) => group.appendChild(makeSetRow(s, i + 1)));
+      listCard.appendChild(group);
     }
   }
   wrap.appendChild(listCard);
   return wrap;
 
   // Baut eine Satz-Zeile mit Anzeige- und Bearbeiten-Modus.
-  function makeSetRow(s) {
+  // setNo = laufende Satznummer innerhalb der Übung (Satz 1, 2, …).
+  function makeSetRow(s, setNo) {
     const row = h('div', { class: 'set-item' });
     const showView = () => {
       clear(row);
-      const ex = eById.get(s.exerciseId);
       row.appendChild(s.photo
         ? h('img', { class: 'set-thumb', src: s.photo, onclick: () => showPhoto(s.photo) })
         : h('div', { class: 'set-thumb empty' }, '—'));
       row.appendChild(h('div', { class: 'set-main' },
-        h('strong', {}, ex ? ex.name : '?'),
-        h('div', { class: 'muted small' }, `${s.weight} kg × ${s.reps}${s.rpe ? ' · RPE ' + s.rpe : ''} · e1RM ${round1(e1rm(s.weight, s.reps, FORMULA))} kg`),
+        h('div', { class: 'set-line' },
+          h('span', { class: 'set-no' }, `${tr('Satz', 'Set')} ${setNo}`),
+          h('strong', { class: 'set-load' }, `${s.weight} kg × ${s.reps} ${tr('Wdh.', 'reps')}`),
+        ),
+        h('div', { class: 'muted small' }, `${s.rpe ? 'RPE ' + s.rpe + ' · ' : ''}e1RM ${round1(e1rm(s.weight, s.reps, FORMULA))} kg`),
       ));
       row.appendChild(h('button', { class: 'btn ghost small', onclick: showEdit, title: tr('Bearbeiten', 'Edit') }, '✎'));
       row.appendChild(h('button', { class: 'btn ghost small danger', onclick: async () => { await db.delete('sets', s.id); route(); } }, '✕'));
