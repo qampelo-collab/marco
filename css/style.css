@@ -230,6 +230,12 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .pbar { height: 10px; background: var(--bg-elev); border-radius: 999px; overflow: hidden; margin-top: 6px; }
 .pbar > i { display: block; height: 100%; background: var(--primary); }
 
+/* Ziele */
+.goal { padding: 10px 0; border-top: 1px solid var(--border); }
+.goal:first-of-type { border-top: none; }
+.goal-add { margin-top: 10px; }
+.goal-add > summary { cursor: pointer; color: var(--primary); font-weight: 600; padding: 6px 0; }
+
 /* Photo overlay */
 .overlay {
   position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.9);

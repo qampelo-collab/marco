@@ -2,7 +2,7 @@
 // Alle Daten bleiben auf dem Gerät. Kein Server, offline nutzbar.
 
 const DB_NAME = 'kraft-tracker';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 // Object Stores (Tabellen):
 //  exercises   – Übungskatalog: {id, name, category, equipment, unit}
@@ -21,6 +21,7 @@ const STORES = {
   nutrition:  { keyPath: 'id', autoIncrement: true, indexes: [['date', 'date']] },
   activity:   { keyPath: 'id', autoIncrement: true, indexes: [['date', 'date']] },
   templates:  { keyPath: 'id', autoIncrement: true },
+  goals:      { keyPath: 'id', autoIncrement: true, indexes: [['exerciseId', 'exerciseId']] },
   meta:       { keyPath: 'key' },
 };
 

@@ -247,6 +247,7 @@ async function renderTraining() {
 
   const apiKey = await db.getMeta('apiKey', '');
   const visionModel = await db.getMeta('visionModel', DEFAULT_VISION_MODEL);
+  const defaultRest = parseInt(await db.getMeta('defaultRest', 90), 10) || 90;
 
   // aktuelle (offene) Einheit = zuletzt gewählte im Meta, sonst neu über Button
   let currentId = await db.getMeta('currentWorkout', null);
@@ -367,9 +368,11 @@ async function renderTraining() {
   const sets = [...await db.byIndex('sets', 'workoutId', current.id)].sort((a, b) => (b.ts || 0) - (a.ts || 0));
   const eById = new Map(exercises.map((e) => [e.id, e]));
 
-  // Pausenzeit für eine Übung: aus dem Plan, sonst Standard (90s).
+  // Pausenzeit für eine Übung: Plan > übungseigene Zeit > Standard.
   function restSecondsFor(exId) {
-    let sec = 90;
+    let sec = defaultRest;
+    const ex = eById.get(exId);
+    if (ex && ex.rest > 0) sec = ex.rest;
     if (current.plan) {
       const it = current.plan.find((p) => p.exerciseId === exId);
       if (it) { const r = parseRestSeconds(it.rest); if (r) sec = r; }
@@ -646,6 +649,20 @@ async function renderExerciseDetail(id) {
   wrap.appendChild(h('a', { class: 'back', href: '#uebungen' }, '‹ Zurück zu Übungen'));
   wrap.appendChild(h('h1', {}, ex ? ex.name : 'Übung'));
 
+  // Pro-Übung-Pause
+  if (ex) {
+    const restI = h('input', { type: 'number', step: '5', min: '0', inputmode: 'numeric', class: 'inp',
+      value: ex.rest || '', placeholder: tr('Standard', 'default') });
+    restI.addEventListener('change', async () => {
+      const v = parseInt(restI.value, 10);
+      ex.rest = v > 0 ? v : null;
+      await db.put('exercises', ex);
+      toast(tr('Gespeichert ✓', 'Saved ✓'));
+    });
+    wrap.appendChild(h('div', { class: 'card' },
+      h('label', { class: 'field' }, h('span', {}, tr('⏱ Pause für diese Übung (Sek., leer = Standard)', '⏱ Rest for this exercise (sec, empty = default)')), restI)));
+  }
+
   if (prog.sessions === 0) {
     wrap.appendChild(h('div', { class: 'card' }, h('p', { class: 'muted' }, 'Noch keine Sätze für diese Übung erfasst.')));
     return wrap;
@@ -748,15 +765,68 @@ async function renderPlans() {
 //  FORTSCHRITT (Forecast + Milestones)
 // ==================================================================
 async function renderProgress() {
-  const { enriched } = await loadEnrichedSets();
+  const { enriched, exercises } = await loadEnrichedSets();
+  const goals = [...await db.all('goals')];
   const wrap = h('div', { class: 'view' });
   wrap.appendChild(h('a', { class: 'back', href: '#dashboard' }, tr('‹ Zurück', '‹ Back')));
   wrap.appendChild(h('h1', {}, tr('Fortschritt', 'Progress')));
 
   const byEx = new Map();
   for (const s of enriched) { if (!byEx.has(s.exerciseId)) byEx.set(s.exerciseId, []); byEx.get(s.exerciseId).push(s); }
+  const progById = new Map();
+  for (const [exId, ss] of byEx) progById.set(exId, progression(ss, FORMULA));
+
+  // ----- Eigene Ziele (mit Termin) -----
+  const DAY = 86400000;
+  const goalsCard = h('div', { class: 'card' }, h('h2', {}, tr('🎯 Deine Ziele', '🎯 Your goals')));
+  for (const g of goals.sort((a, b) => (a.deadline || '').localeCompare(b.deadline || ''))) {
+    const prog = progById.get(g.exerciseId);
+    const cur = prog ? prog.current : 0;
+    const pct = Math.max(0, Math.min(100, Math.round((cur / g.target) * 100)));
+    const daysLeft = g.deadline ? Math.round((new Date(g.deadline) - new Date(todayStr())) / DAY) : null;
+    const wtt = prog ? weeksToTarget(prog, g.target) : null;
+    let status, cls;
+    if (cur >= g.target) { status = tr('erreicht ✓', 'reached ✓'); cls = 'up'; }
+    else if (wtt != null && daysLeft != null && wtt * 7 <= daysLeft) { status = tr('auf Kurs', 'on track'); cls = 'up'; }
+    else { status = tr('dranbleiben', 'push harder'); cls = 'down'; }
+    const dText = daysLeft == null ? '' :
+      daysLeft > 0 ? tr(`noch ${daysLeft} Tage`, `${daysLeft} days left`) :
+      daysLeft === 0 ? tr('heute!', 'today!') : tr(`${-daysLeft} Tage überfällig`, `${-daysLeft} days overdue`);
+    goalsCard.appendChild(h('div', { class: 'goal' },
+      h('div', { class: 'chart-head' },
+        h('strong', {}, `${g.exerciseName}: ${cur} → ${g.target} kg`),
+        h('button', { class: 'btn ghost small danger', onclick: async () => { await db.delete('goals', g.id); route(); } }, '✕')),
+      h('div', { class: 'pbar' }, h('i', { style: `width:${pct}%` })),
+      h('div', { class: 'muted small', style: 'margin-top:4px' },
+        h('span', { class: 'delta ' + cls }, status), ` · ${dText}` +
+        (g.deadline ? ' · ' + fmtDate(g.deadline) : '') +
+        (wtt != null && cur < g.target ? ' · ' + tr(`Trend: ~${wtt} Wochen`, `trend: ~${wtt} weeks`) : '')),
+    ));
+  }
+  // Ziel hinzufügen
+  const gEx = h('select', { class: 'inp' },
+    ...exercises.map((e) => h('option', { value: e.id }, e.name)));
+  const gTarget = h('input', { type: 'number', step: '2.5', inputmode: 'decimal', class: 'inp', placeholder: tr('Ziel-1RM (kg)', 'target 1RM (kg)') });
+  const gDate = h('input', { type: 'date', class: 'inp' });
+  goalsCard.appendChild(h('details', { class: 'goal-add' },
+    h('summary', {}, tr('+ Ziel hinzufügen', '+ Add goal')),
+    h('label', { class: 'field' }, h('span', {}, tr('Übung', 'Exercise')), gEx),
+    h('div', { class: 'field-row' },
+      h('label', { class: 'field' }, h('span', {}, tr('Ziel (kg)', 'Target (kg)')), gTarget),
+      h('label', { class: 'field' }, h('span', {}, tr('Termin', 'Deadline')), gDate)),
+    h('button', { class: 'btn primary', onclick: async () => {
+      const t = parseFloat(gTarget.value);
+      if (!(t > 0)) { alert(tr('Bitte ein Ziel-Gewicht eingeben.', 'Please enter a target weight.')); return; }
+      const exId = parseInt(gEx.value, 10);
+      const exName = (exercises.find((e) => e.id === exId) || {}).name || '';
+      await db.add('goals', { exerciseId: exId, exerciseName: exName, target: t, deadline: gDate.value || null, createdAt: Date.now() });
+      route();
+    } }, tr('Ziel speichern', 'Save goal')),
+  ));
+  wrap.appendChild(goalsCard);
+
   const items = [...byEx.entries()]
-    .map(([id, sets]) => ({ name: sets[0].exerciseName, prog: progression(sets, FORMULA) }))
+    .map(([id, sets]) => ({ name: sets[0].exerciseName, prog: progById.get(id) }))
     .filter((p) => p.prog.sessions >= 2)
     .sort((a, b) => b.prog.current - a.prog.current);
 
@@ -981,6 +1051,20 @@ async function renderSettings() {
     h('label', { class: 'field' }, h('span', {}, 'Akzentfarbe'), swatches),
   ));
 
+  // Timer: Standard-Pause
+  const curRest = parseInt(await db.getMeta('defaultRest', 90), 10) || 90;
+  const restInp = h('input', { type: 'number', step: '5', min: '10', inputmode: 'numeric', class: 'inp', value: curRest });
+  restInp.addEventListener('change', async () => {
+    const v = parseInt(restInp.value, 10);
+    if (v >= 5) await db.setMeta('defaultRest', v);
+  });
+  wrap.appendChild(h('div', { class: 'card' },
+    h('h2', {}, tr('⏱ Pausen-Timer', '⏱ Rest timer')),
+    h('p', { class: 'muted small' }, tr('Standard-Pause in Sekunden (gilt, wenn die Übung/der Plan keine eigene Zeit hat). Pro Übung einstellbar unter Übungen → Übung öffnen.',
+      'Default rest in seconds (used when the exercise/plan has no own time). Set per exercise under Exercises → open an exercise.')),
+    h('label', { class: 'field' }, h('span', {}, tr('Standard-Pause (Sek.)', 'Default rest (sec)')), restInp),
+  ));
+
   // Weitere Bereiche
   wrap.appendChild(h('div', { class: 'card' },
     h('h2', {}, 'Training'),
@@ -1051,7 +1135,7 @@ async function renderSettings() {
     h('h2', {}, 'Zurücksetzen'),
     h('button', { class: 'btn ghost danger', onclick: async () => {
       if (confirm(L('Wirklich ALLE Daten löschen? Vorher am besten ein Backup machen.'))) {
-        for (const s of ['exercises', 'workouts', 'sets', 'body', 'nutrition', 'activity', 'templates']) await db.clear(s);
+        for (const s of ['exercises', 'workouts', 'sets', 'body', 'nutrition', 'activity', 'templates', 'goals']) await db.clear(s);
         await db.setMeta('currentWorkout', null);
         await db.setMeta('planV1Installed', false);
         location.hash = '#dashboard'; route();
