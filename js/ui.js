@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v40';
+const APP_VERSION = 'v41';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -1519,10 +1519,6 @@ async function renderBody() {
     h('label', { class: 'field' }, h('span', {}, 'Datum'), dateI),
     h('label', { class: 'field' }, h('span', {}, 'Körpergewicht (kg)'), wI),
     h('div', { class: 'field-row' },
-      h('label', { class: 'field' }, h('span', {}, tr('Körpergröße (cm, einmalig)', 'Height (cm, one-time)')), heightI),
-      h('label', { class: 'field' }, h('span', {}, tr('Geschlecht (für Schätzung)', 'Sex (for estimate)')), sexSel),
-    ),
-    h('div', { class: 'field-row' },
       h('label', { class: 'field' }, h('span', {}, 'Schulter'), shoulderI),
       h('label', { class: 'field' }, h('span', {}, 'Brust'), chestI),
     ),
@@ -1536,6 +1532,13 @@ async function renderBody() {
     ),
     h('label', { class: 'field' }, h('span', {}, tr('Körperfett % (optional)', 'Body fat % (optional)')), bfI),
     bfHint,
+    // Einmal-Einstellungen für die Körperfett-Schätzung – eingeklappt.
+    h('details', { class: 'manual-details' },
+      h('summary', {}, tr('⚙️ Größe & Geschlecht (für die Schätzung, einmalig)', '⚙️ Height & sex (for the estimate, one-time)')),
+      h('div', { class: 'field-row', style: 'margin-top:10px' },
+        h('label', { class: 'field' }, h('span', {}, tr('Körpergröße (cm)', 'Height (cm)')), heightI),
+        h('label', { class: 'field' }, h('span', {}, tr('Geschlecht', 'Sex')), sexSel),
+      )),
     h('button', { class: 'btn primary', onclick: async () => {
       const weight = parseFloat(wI.value);
       const bfManual = parseFloat(bfI.value);
