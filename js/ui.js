@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v19';
+const APP_VERSION = 'v20';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -279,24 +279,9 @@ async function renderTraining() {
   wrap.appendChild(h('h1', {}, 'Training erfassen'));
 
   if (!current) {
-    const dateInput = h('input', { type: 'date', value: todayStr(), class: 'inp' });
-    wrap.appendChild(h('div', { class: 'card' },
-      h('h2', {}, 'Neue Einheit starten'),
-      h('label', { class: 'field' }, h('span', {}, 'Datum'), dateInput),
-      h('button', { class: 'btn primary', onclick: async () => {
-        const id = await db.add('workouts', { date: dateInput.value || todayStr(), notes: '' });
-        await db.setMeta('currentWorkout', id);
-        route();
-      } }, 'Einheit starten'),
-    ));
-
-    // --- Schnell-Erfassung (auch vergangene Trainings) ---
+    // ============ HAUPTWEG: Training aus Foto der Notizen ============
     const qDate = h('input', { type: 'date', value: todayStr(), class: 'inp' });
-    const qEx = h('select', { class: 'inp' },
-      ...exercises.map((e) => h('option', { value: e.id }, `${e.name} (${CAT_LABEL[e.category] || e.category})`)));
-    const qWeight = h('input', { type: 'number', step: '0.5', inputmode: 'decimal', class: 'inp', placeholder: tr('kg (0 = Körpergewicht)', 'kg (0 = bodyweight)') });
-    const qReps = h('input', { type: 'number', step: '1', inputmode: 'numeric', class: 'inp', placeholder: tr('Wdh.', 'Reps') });
-    const qPhotoInp = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'inp-file' });
+    const qPhotoInp = h('input', { type: 'file', accept: 'image/*', capture: 'environment', style: 'display:none' });
     const qPreview = h('div', { class: 'photo-preview' });
     const qHint = h('div', { class: 'hint' }, '');
     const qAll = h('div', { class: 'quick-all' });
@@ -326,28 +311,22 @@ async function renderTraining() {
       toast(tr(`Gespeichert ✓ (${n} Sätze)`, `Saved ✓ (${n} sets)`));
       route();
     }
-    qPhotoInp.addEventListener('change', async () => {
-      const file = qPhotoInp.files[0];
-      if (!file) { qPhoto = null; clear(qPreview); return; }
-      // Datum aus dem Foto übernehmen (Aufnahme-/Änderungsdatum).
-      if (file.lastModified) qDate.value = new Date(file.lastModified).toISOString().slice(0, 10);
-      qPhoto = await downscaleImage(file, 1000, 0.7);
-      clear(qPreview); qPreview.appendChild(h('img', { src: qPhoto }));
-    });
-    const qAiBtn = h('button', { class: 'btn ghost', onclick: async () => {
-      if (!apiKey) { qHint.textContent = tr('Kein API-Schlüssel – unter „Mehr" hinterlegen.', 'No API key — add it under “More”.'); return; }
-      if (!qPhoto) { qHint.textContent = tr('Bitte zuerst ein Foto aufnehmen/auswählen.', 'Please take/select a photo first.'); return; }
-      const o = qAiBtn.textContent; qAiBtn.textContent = tr('🤖 Lese Foto …', '🤖 Reading photo …'); qAiBtn.disabled = true; qHint.textContent = '';
+    // Foto auslesen (wird nach dem Fotografieren automatisch aufgerufen).
+    async function runExtraction() {
+      if (!qPhoto) return;
+      if (!apiKey) {
+        clear(qHint); qHint.appendChild(document.createTextNode(tr('Kein KI-Schlüssel hinterlegt. ', 'No AI key set. ')));
+        qHint.appendChild(h('a', { href: '#einstellungen', class: 'back' }, tr('Unter „Mehr" hinzufügen', 'Add it under “More”')));
+        qHint.appendChild(document.createTextNode(tr(' – oder unten manuell erfassen.', ' — or log manually below.')));
+        return;
+      }
+      qHint.textContent = tr('🤖 Lese Foto …', '🤖 Reading photo …'); clear(qAll);
       try {
         const res = await extractSetsFromImage({ dataUrl: qPhoto, apiKey, model: visionModel, exerciseNames: exercises.map((e) => e.name) });
         qRecognized = res.sets || []; qRecName = res.name || null;
         if (res.date) qDate.value = res.date;
         clear(qAll);
         if (qRecognized.length) {
-          const s = qRecognized[0];
-          if (s.weight != null) qWeight.value = s.weight;
-          if (s.reps != null) qReps.value = s.reps;
-          const id = qMatch(s.exercise); if (id) qEx.value = id;
           qHint.textContent = (res.name ? res.name + ' · ' : '') +
             tr(`${qRecognized.length} Sätze erkannt`, `${qRecognized.length} sets recognized`) +
             (res.date ? ' · ' + fmtDate(res.date) : '') + (res.note ? ' · ' + res.note : '');
@@ -356,37 +335,72 @@ async function renderTraining() {
           qAll.appendChild(list);
           qAll.appendChild(h('button', { class: 'btn primary', onclick: saveWholeSession },
             tr(`✅ Ganzes Training speichern (${qRecognized.length} Sätze)`, `✅ Save whole session (${qRecognized.length} sets)`)));
-        } else { qHint.textContent = tr('Keine Werte erkannt.', 'No values recognized.'); }
+        } else { qHint.textContent = tr('Keine Werte erkannt. Schärferes Foto versuchen – oder unten manuell erfassen.', 'No values recognized. Try a sharper photo — or log manually below.'); }
       } catch (err) { qHint.textContent = '⚠️ ' + err.message; }
-      finally { qAiBtn.textContent = o; qAiBtn.disabled = false; }
-    } }, tr('🔍 Aus Foto lesen (KI)', '🔍 Read from photo (AI)'));
+    }
+    qPhotoInp.addEventListener('change', async () => {
+      const file = qPhotoInp.files[0];
+      if (!file) return;
+      if (file.lastModified) qDate.value = new Date(file.lastModified).toISOString().slice(0, 10);
+      qPhoto = await downscaleImage(file, 1000, 0.7);
+      clear(qPreview); qPreview.appendChild(h('img', { src: qPhoto }));
+      qRecognized = []; clear(qAll);
+      runExtraction();   // sofort automatisch auslesen
+    });
+
+    const takeBtn = h('label', { class: 'btn primary big-pause' }, qPhotoInp, tr('📷 Trainingsnotiz fotografieren', '📷 Photograph your notes'));
+    const reBtn = h('button', { class: 'btn ghost small', onclick: runExtraction }, tr('🔄 Erneut lesen', '🔄 Read again'));
 
     wrap.appendChild(h('div', { class: 'card' },
-      h('h2', {}, tr('⚡ Schnell erfassen (auch vergangene)', '⚡ Quick log (incl. past)')),
-      h('p', { class: 'muted small' }, tr('Foto aufnehmen (übernimmt das Datum), Werte prüfen, „Speichern & nächstes".',
-        'Take a photo (uses its date), check the values, then “Save & next”.')),
-      h('label', { class: 'field' }, h('span', {}, tr('Datum', 'Date')), qDate),
-      h('label', { class: 'field' }, h('span', {}, tr('Übung', 'Exercise')), qEx),
-      h('div', { class: 'field-row' },
-        h('label', { class: 'field' }, h('span', {}, tr('Gewicht', 'Weight')), qWeight),
-        h('label', { class: 'field' }, h('span', {}, tr('Wiederholungen', 'Reps')), qReps),
-      ),
-      h('label', { class: 'field' }, h('span', {}, tr('📷 Foto (inkl. Datum)', '📷 Photo (incl. date)')), qPhotoInp),
+      h('h2', {}, tr('📷 Training aus Foto', '📷 Training from photo')),
+      h('p', { class: 'muted small' }, tr(
+        'Fotografiere deine Notiz – Datum, Übungen, Sätze, Gewichte und ＋/－ werden automatisch erkannt und als komplettes Training gespeichert.',
+        'Photograph your notes — date, exercises, sets, weights and ＋/－ are recognized automatically and saved as a full session.')),
+      takeBtn,
       qPreview,
-      qAiBtn,
       qHint,
       qAll,
-      h('div', { class: 'muted small', style: 'margin:8px 0 2px' }, tr('… oder einzelnen Satz:', '… or a single set:')),
-      h('button', { class: 'btn primary', onclick: async () => {
-        let w = parseFloat(qWeight.value); if (isNaN(w)) w = 0;   // leer = Körpergewicht
-        const r = parseInt(qReps.value, 10);
-        if (w < 0 || !(r > 0)) { alert(tr('Bitte Gewicht und Wiederholungen eingeben.', 'Please enter weight and reps.')); return; }
-        const wid = await db.add('workouts', { date: qDate.value || todayStr(), notes: '' });
-        await db.add('sets', { workoutId: wid, exerciseId: parseInt(qEx.value, 10), weight: w, reps: r, rpe: null, photo: qPhoto || null, ts: Date.now() });
-        toast(tr('Gespeichert ✓ – nächstes', 'Saved ✓ — next'));
-        qWeight.value = ''; qReps.value = ''; qPhoto = null; qPhotoInp.value = ''; clear(qPreview); qHint.textContent = '';
-        qWeight.focus();
-      } }, tr('Speichern & nächstes', 'Save & next')),
+      h('label', { class: 'field', style: 'margin-top:12px' }, h('span', {}, tr('Datum (aus Foto)', 'Date (from photo)')), qDate),
+      reBtn,
+    ));
+
+    // ============ AUSNAHME: manuell erfassen (eingeklappt) ============
+    const mDate = h('input', { type: 'date', value: todayStr(), class: 'inp' });
+    const mEx = h('select', { class: 'inp' },
+      ...exercises.map((e) => h('option', { value: e.id }, `${e.name} (${CAT_LABEL[e.category] || e.category})`)));
+    const mWeight = h('input', { type: 'number', step: '0.5', inputmode: 'decimal', class: 'inp', placeholder: tr('kg (0 = Körpergewicht)', 'kg (0 = bodyweight)') });
+    const mReps = h('input', { type: 'number', step: '1', inputmode: 'numeric', class: 'inp', placeholder: tr('Wdh.', 'Reps') });
+    const mTend = tendencyPicker(null);
+    const mStartDate = h('input', { type: 'date', value: todayStr(), class: 'inp' });
+
+    wrap.appendChild(h('details', { class: 'manual-details' },
+      h('summary', {}, tr('✏️ Stattdessen manuell erfassen', '✏️ Log manually instead')),
+      h('div', { class: 'card', style: 'margin-top:10px' },
+        h('p', { class: 'muted small' }, tr('Einzelnen Satz ohne Foto erfassen.', 'Log a single set without a photo.')),
+        h('label', { class: 'field' }, h('span', {}, tr('Datum', 'Date')), mDate),
+        h('label', { class: 'field' }, h('span', {}, tr('Übung', 'Exercise')), mEx),
+        h('div', { class: 'field-row' },
+          h('label', { class: 'field' }, h('span', {}, tr('Gewicht', 'Weight')), mWeight),
+          h('label', { class: 'field' }, h('span', {}, tr('Wiederholungen', 'Reps')), mReps),
+        ),
+        h('label', { class: 'field' }, h('span', {}, tr('Tendenz (optional)', 'Tendency (optional)')), mTend.el),
+        h('button', { class: 'btn primary', onclick: async () => {
+          let w = parseFloat(mWeight.value); if (isNaN(w)) w = 0;
+          const r = parseInt(mReps.value, 10);
+          if (w < 0 || !(r > 0)) { alert(tr('Bitte Gewicht und Wiederholungen eingeben.', 'Please enter weight and reps.')); return; }
+          const wid = await db.add('workouts', { date: mDate.value || todayStr(), notes: '' });
+          await db.add('sets', { workoutId: wid, exerciseId: parseInt(mEx.value, 10), weight: w, reps: r, rpe: null, tendency: mTend.get(), photo: null, ts: Date.now() });
+          toast(tr('Gespeichert ✓ – nächstes', 'Saved ✓ — next'));
+          mWeight.value = ''; mReps.value = ''; mTend.set(null); mWeight.focus();
+        } }, tr('Speichern & nächstes', 'Save & next')),
+        h('div', { class: 'muted small', style: 'margin:14px 0 6px' }, tr('… oder eine Einheit live mitschreiben:', '… or log a session live:')),
+        h('label', { class: 'field' }, h('span', {}, tr('Datum', 'Date')), mStartDate),
+        h('button', { class: 'btn ghost', onclick: async () => {
+          const id = await db.add('workouts', { date: mStartDate.value || todayStr(), notes: '' });
+          await db.setMeta('currentWorkout', id);
+          route();
+        } }, tr('▶ Leere Einheit live starten', '▶ Start empty live session')),
+      ),
     ));
 
     // Vergangene Einheiten

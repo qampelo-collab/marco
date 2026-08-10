@@ -248,6 +248,14 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .pbar { height: 10px; background: var(--bg-elev); border-radius: 999px; overflow: hidden; margin-top: 6px; }
 .pbar > i { display: block; height: 100%; background: var(--primary); }
 
+/* Manuell erfassen (eingeklappt) */
+details.manual-details { margin-top: 2px; }
+details.manual-details > summary {
+  cursor: pointer; color: var(--muted); font-weight: 600;
+  padding: 12px 0; text-align: center; list-style: none;
+}
+details.manual-details > summary::-webkit-details-marker { display: none; }
+
 /* Ziele */
 .goal { padding: 10px 0; border-top: 1px solid var(--border); }
 .goal:first-of-type { border-top: none; }
