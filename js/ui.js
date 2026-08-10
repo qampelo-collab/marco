@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v22';
+const APP_VERSION = 'v23';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -736,6 +736,18 @@ async function renderExercises() {
   const countByEx = new Map();
   for (const s of enriched) countByEx.set(s.exerciseId, (countByEx.get(s.exerciseId) || 0) + 1);
 
+  // Welche Übungen stecken im Trainingsplan? (für „nur Plan-Übungen behalten")
+  const templates = await db.all('templates');
+  const planIds = new Set();
+  const planNames = new Set();
+  for (const t of templates) for (const it of (t.items || [])) {
+    if (it.exerciseId != null) planIds.add(it.exerciseId);
+    if (it.exerciseName) planNames.add(it.exerciseName.toLowerCase());
+  }
+  // Sicher entfernbar: nicht im Plan UND keine erfassten Sätze.
+  const unused = exercises.filter((e) =>
+    (countByEx.get(e.id) || 0) === 0 && !planIds.has(e.id) && !planNames.has(e.name.toLowerCase()));
+
   const wrap = h('div', { class: 'view' });
   wrap.appendChild(h('h1', {}, 'Übungen'));
 
@@ -757,6 +769,22 @@ async function renderExercises() {
       route();
     } }, '+ Übung anlegen'),
   ));
+
+  // Katalog aufräumen: ungenutzte Übungen entfernen (nur wenn es welche gibt)
+  if (unused.length) {
+    wrap.appendChild(h('div', { class: 'card' },
+      h('h2', {}, tr('🧹 Katalog aufräumen', '🧹 Tidy catalog')),
+      h('p', { class: 'muted small' }, tr(
+        `${unused.length} Übungen sind nicht in deinem Trainingsplan und haben keine erfassten Sätze. So bleiben nur die Übungen übrig, die du wirklich nutzt.`,
+        `${unused.length} exercises aren’t in your plan and have no logged sets. Removing them keeps only the ones you actually use.`)),
+      h('button', { class: 'btn ghost danger', onclick: async () => {
+        if (!confirm(tr(`${unused.length} ungenutzte Übungen entfernen?`, `Remove ${unused.length} unused exercises?`))) return;
+        for (const e of unused) await db.delete('exercises', e.id);
+        toast(tr('Aufgeräumt ✓', 'Tidied ✓'));
+        route();
+      } }, tr(`${unused.length} ungenutzte entfernen`, `Remove ${unused.length} unused`)),
+    ));
+  }
 
   // Liste
   const byCat = {};
@@ -786,18 +814,42 @@ async function renderExerciseDetail(id) {
   wrap.appendChild(h('a', { class: 'back', href: '#uebungen' }, '‹ Zurück zu Übungen'));
   wrap.appendChild(h('h1', {}, ex ? ex.name : 'Übung'));
 
-  // Pro-Übung-Pause
+  // Übung bearbeiten (Name, Kategorie, Gerät, Pause) + löschen
   if (ex) {
+    const nameE = h('input', { class: 'inp', value: ex.name });
+    const catE = h('select', { class: 'inp' }, ...Object.entries(CAT_LABEL).map(([v, l]) => h('option', { value: v }, l)));
+    catE.value = ex.category;
+    const equipE = h('input', { class: 'inp', value: ex.equipment || '', placeholder: tr('Gerät (optional)', 'Equipment (optional)') });
     const restI = h('input', { type: 'number', step: '5', min: '0', inputmode: 'numeric', class: 'inp',
       value: ex.rest || '', placeholder: tr('Standard', 'default') });
-    restI.addEventListener('change', async () => {
-      const v = parseInt(restI.value, 10);
-      ex.rest = v > 0 ? v : null;
-      await db.put('exercises', ex);
-      toast(tr('Gespeichert ✓', 'Saved ✓'));
-    });
     wrap.appendChild(h('div', { class: 'card' },
-      h('label', { class: 'field' }, h('span', {}, tr('⏱ Pause für diese Übung (Sek., leer = Standard)', '⏱ Rest for this exercise (sec, empty = default)')), restI)));
+      h('h2', {}, tr('Übung bearbeiten', 'Edit exercise')),
+      h('label', { class: 'field' }, h('span', {}, tr('Name', 'Name')), nameE),
+      h('div', { class: 'field-row' },
+        h('label', { class: 'field' }, h('span', {}, tr('Kategorie', 'Category')), catE),
+        h('label', { class: 'field' }, h('span', {}, tr('Gerät', 'Equipment')), equipE),
+      ),
+      h('label', { class: 'field' }, h('span', {}, tr('⏱ Pause (Sek., leer = Standard)', '⏱ Rest (sec, empty = default)')), restI),
+      h('button', { class: 'btn primary', onclick: async () => {
+        const nm = nameE.value.trim();
+        if (!nm) { alert(L('Bitte Namen eingeben.')); return; }
+        ex.name = nm; ex.category = catE.value; ex.equipment = equipE.value.trim();
+        const rv = parseInt(restI.value, 10); ex.rest = rv > 0 ? rv : null;
+        await db.put('exercises', ex);
+        toast(tr('Gespeichert ✓', 'Saved ✓'));
+        route();
+      } }, tr('✓ Speichern', '✓ Save')),
+      h('button', { class: 'btn ghost danger', onclick: async () => {
+        const n = sets.length;
+        const msg = n
+          ? tr(`„${ex.name}" und ${n} zugehörige Sätze löschen?`, `Delete “${ex.name}” and its ${n} sets?`)
+          : tr(`„${ex.name}" löschen?`, `Delete “${ex.name}”?`);
+        if (!confirm(msg)) return;
+        if (n) { const all = await db.byIndex('sets', 'exerciseId', id); for (const s of all) await db.delete('sets', s.id); }
+        await db.delete('exercises', id);
+        location.hash = '#uebungen'; route();
+      } }, tr('🗑 Übung löschen', '🗑 Delete exercise')),
+    ));
   }
 
   if (prog.sessions === 0) {
