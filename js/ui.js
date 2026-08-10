@@ -1,7 +1,7 @@
 // ui.js — Oberfläche: Router + alle Ansichten.
 
 import { db, exportAll, importAll } from './db.js';
-import { e1rm, progression, dayKey, totalVolume, weeklyVolumeByCategory, round1, bestE1rm, navyBodyFat } from './calc.js';
+import { e1rm, progression, dayKey, totalVolume, weeklyVolumeByCategory, round1, bestE1rm, navyBodyFat, weightForReps, roundToStep } from './calc.js';
 import { buildSuggestions } from './coach.js';
 import { lineChart, barChart } from './charts.js';
 import { extractSetsFromImage, VISION_MODELS, DEFAULT_VISION_MODEL } from './vision.js';
@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v38';
+const APP_VERSION = 'v39';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -1397,33 +1397,54 @@ async function renderProgress() {
   }
 
   wrap.appendChild(h('p', { class: 'muted small' }, tr(
-    'Die App setzt dir je Übung automatisch das nächste Ziel (Meilenstein) auf Basis deiner Bestwerte. So siehst du auf einen Blick, wie nah du dran bist.',
-    'For each exercise the app sets the next goal (milestone) from your best values — so you see at a glance how close you are.')));
+    'Je Übung ein konkretes nächstes Ziel als Gewicht × Wiederholungen – daran kannst du dich im Training direkt messen. Dazu der nächste kleine Schritt dorthin.',
+    'For each exercise a concrete next goal as weight × reps — something you can actually attempt in the gym — plus the next small step toward it.')));
 
   for (const it of items) {
     const p = it.prog;
-    const best = it.best;
-    const target = nextMilestone(best);
+    const best = it.best;                                  // bestes e1RM
+    const bestSet = bestE1rm(it.sets, FORMULA).set;        // der zugehörige reale Satz
+    const target = nextMilestone(best);                    // nächster Meilenstein (1RM)
     const ms = milestoneProgress(best);
     const reached = best >= target;
     const slope = p.slopePerWeek;
     const etaWeeks = slope > 0 ? Math.ceil((target - best) / slope) : null;
+
+    // Trainings-Wiederholungszahl: so, wie er die Übung zuletzt am besten machte.
+    const reps = bestSet && bestSet.reps > 0 ? bestSet.reps : 5;
+    const curW = bestSet ? bestSet.weight : 0;
+    const targetW = roundToStep(weightForReps(target, reps, FORMULA));
+
+    // Konkreter nächster Schritt (klein & machbar): +1 Wdh. oder +2,5 kg.
+    const stepA = `${round1(curW)} kg × ${reps + 1}`;
+    const stepB = `${round1(curW + 2.5)} kg × ${reps}`;
+
+    // Alternative Ziel-Schemata (gleiches 1RM, andere Wdh.).
+    const altReps = [3, 5, 8, 10].filter((r) => r !== reps).slice(0, 2);
+    const alts = altReps.map((r) => `${roundToStep(weightForReps(target, r, FORMULA))}×${r}`).join(' · ');
+
     const etaTxt = reached
-      ? tr('Nächstes Ziel erreicht 🎉 – neues folgt automatisch', 'Next goal reached 🎉 — a new one follows automatically')
+      ? tr('Nächste Stufe erreicht 🎉 – neue folgt automatisch', 'Next level reached 🎉 — a new one follows automatically')
       : etaWeeks != null
-        ? tr(`Bei aktuellem Tempo: Ziel in ~${etaWeeks} Wochen`, `At current pace: goal in ~${etaWeeks} weeks`)
+        ? tr(`Bei aktuellem Tempo: in ~${etaWeeks} Wochen`, `At current pace: in ~${etaWeeks} weeks`)
         : tr('Trend gerade flach – hier lohnt sich der Fokus', 'Trend flat right now — worth focusing here');
+
     wrap.appendChild(h('div', { class: 'card' },
       h('div', { class: 'chart-head' },
         h('h2', {}, it.name),
         h('span', { class: slope >= 0 ? 'delta up' : 'delta down' },
           (slope >= 0 ? '+' : '') + slope + ' kg/' + tr('Wo.', 'wk'))),
+      // Konkretes Ziel: Gewicht × Wiederholungen (daran kannst du dich messen)
       h('div', { class: 'goal-progress' },
-        h('strong', {}, `${best} kg`),
+        h('strong', {}, curW ? `${round1(curW)} kg × ${reps}` : `${best} kg`),
         h('span', { class: 'muted' }, ' → '),
-        h('strong', { class: 'goal-target' }, `${target} kg`)),
+        h('strong', { class: 'goal-target' }, `${targetW} kg × ${reps}`)),
       h('div', { class: 'pbar' }, h('i', { style: `width:${reached ? 100 : ms.pct}%` })),
-      h('div', { class: 'muted small', style: 'margin-top:6px' }, etaTxt),
+      h('div', { class: 'muted small', style: 'margin-top:6px' },
+        tr('Nächster Schritt: ', 'Next step: ') + stepA + tr(' oder ', ' or ') + stepB),
+      alts ? h('div', { class: 'muted small' }, tr('Gleiches Ziel auch als: ', 'Same goal also as: ') + alts) : '',
+      h('div', { class: 'muted small', style: 'margin-top:4px' }, etaTxt +
+        ` · ${tr('Meilenstein', 'milestone')} ${target} kg 1RM`),
     ));
   }
   return wrap;

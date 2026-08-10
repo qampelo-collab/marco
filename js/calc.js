@@ -24,6 +24,25 @@ export function round1(x) {
   return Math.round(x * 10) / 10;
 }
 
+// Auf die nächste Hantel-Stufe runden (Standard 2,5 kg).
+export function roundToStep(x, step = 2.5) {
+  return Math.round(x / step) * step;
+}
+
+// Umkehrung des 1RM: Welches Gewicht muss ich für `reps` Wiederholungen
+// bewegen, um ein bestimmtes 1RM zu erreichen? (macht ein 1RM-Ziel konkret)
+export function weightForReps(target1rm, reps, formula = 'epley') {
+  const t = Number(target1rm) || 0;
+  const r = Number(reps) || 0;
+  if (t <= 0 || r <= 0) return 0;
+  if (r === 1) return t;
+  if (formula === 'brzycki') {
+    if (r >= 37) return t;
+    return t * (37 - r) / 36;
+  }
+  return t / (1 + r / 30);
+}
+
 // Volumen eines Satzes = Gewicht * Wiederholungen (Tonnage).
 export function setVolume(weight, reps) {
   return (Number(weight) || 0) * (Number(reps) || 0);
