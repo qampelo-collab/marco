@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v23';
+const APP_VERSION = 'v24';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -1171,6 +1171,7 @@ async function renderBody() {
 
   const dateI = h('input', { type: 'date', value: todayStr(), class: 'inp' });
   const wI = h('input', { type: 'number', step: '0.1', inputmode: 'decimal', class: 'inp', placeholder: 'kg' });
+  const shoulderI = h('input', { type: 'number', step: '0.1', class: 'inp', placeholder: 'cm' });
   const chestI = h('input', { type: 'number', step: '0.1', class: 'inp', placeholder: 'cm' });
   const waistI = h('input', { type: 'number', step: '0.1', class: 'inp', placeholder: 'cm' });
   const armI = h('input', { type: 'number', step: '0.1', class: 'inp', placeholder: 'cm' });
@@ -1181,19 +1182,24 @@ async function renderBody() {
     h('label', { class: 'field' }, h('span', {}, 'Datum'), dateI),
     h('label', { class: 'field' }, h('span', {}, 'Körpergewicht (kg)'), wI),
     h('div', { class: 'field-row' },
+      h('label', { class: 'field' }, h('span', {}, 'Schulter'), shoulderI),
       h('label', { class: 'field' }, h('span', {}, 'Brust'), chestI),
-      h('label', { class: 'field' }, h('span', {}, 'Taille'), waistI),
     ),
     h('div', { class: 'field-row' },
+      h('label', { class: 'field' }, h('span', {}, 'Taille'), waistI),
       h('label', { class: 'field' }, h('span', {}, 'Arm'), armI),
+    ),
+    h('div', { class: 'field-row' },
       h('label', { class: 'field' }, h('span', {}, 'Oberschenkel'), thighI),
+      h('label', { class: 'field' }),
     ),
     h('button', { class: 'btn primary', onclick: async () => {
       const weight = parseFloat(wI.value);
-      if (!(weight > 0) && !chestI.value && !waistI.value) { alert(L('Bitte mindestens einen Wert eingeben.')); return; }
+      if (!(weight > 0) && !shoulderI.value && !chestI.value && !waistI.value) { alert(L('Bitte mindestens einen Wert eingeben.')); return; }
       await db.add('body', {
         date: dateI.value || todayStr(),
         weight: weight || null,
+        shoulder: num(shoulderI.value),
         chest: num(chestI.value), waist: num(waistI.value), arm: num(armI.value), thigh: num(thighI.value),
       });
       route();
@@ -1208,8 +1214,9 @@ async function renderBody() {
   const list = h('div', { class: 'card' }, h('h2', {}, 'Einträge'));
   if (!rows.length) list.appendChild(h('p', { class: 'muted' }, 'Noch keine Einträge.'));
   for (const r of rows.slice(0, 40)) {
-    const parts = [r.weight ? r.weight + ' kg' : null, r.chest ? 'Brust ' + r.chest : null,
-      r.waist ? 'Taille ' + r.waist : null, r.arm ? 'Arm ' + r.arm : null, r.thigh ? 'OSchenkel ' + r.thigh : null].filter(Boolean);
+    const parts = [r.weight ? r.weight + ' kg' : null, r.shoulder ? 'Schulter ' + r.shoulder : null,
+      r.chest ? 'Brust ' + r.chest : null, r.waist ? 'Taille ' + r.waist : null,
+      r.arm ? 'Arm ' + r.arm : null, r.thigh ? 'OSchenkel ' + r.thigh : null].filter(Boolean);
     list.appendChild(h('div', { class: 'set-item' },
       h('div', { class: 'set-main' }, h('strong', {}, fmtDate(r.date)), h('div', { class: 'muted small' }, parts.join(' · '))),
       h('button', { class: 'btn ghost small danger', onclick: async () => { await db.delete('body', r.id); route(); } }, '✕'),
