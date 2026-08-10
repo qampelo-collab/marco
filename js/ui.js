@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v16';
+const APP_VERSION = 'v17';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -788,6 +788,10 @@ async function renderExerciseDetail(id) {
 //  TRAININGSPLÄNE (Vorlagen)
 // ==================================================================
 async function renderPlans() {
+  const params = new URLSearchParams(location.hash.split('?')[1] || '');
+  const editId = params.get('edit');
+  if (editId) return renderPlanEdit(parseInt(editId, 10));
+
   const templates = [...await db.all('templates')];
   const wrap = h('div', { class: 'view' });
   wrap.appendChild(h('a', { class: 'back', href: '#einstellungen' }, '‹ Zurück zu Mehr'));
@@ -813,11 +817,14 @@ async function renderPlans() {
     const card = h('div', { class: 'card' },
       h('div', { class: 'chart-head' },
         h('h2', {}, t.name),
-        h('button', { class: 'btn primary small', onclick: async () => {
-          const wid = await db.add('workouts', { date: todayStr(), notes: '', templateName: t.name, plan: t.items });
-          await db.setMeta('currentWorkout', wid);
-          go('#training');
-        } }, '▶ Starten'),
+        h('div', { class: 'seg' },
+          h('button', { class: 'btn ghost small', onclick: () => go(`#plaene?edit=${t.id}`) }, tr('✎ Bearbeiten', '✎ Edit')),
+          h('button', { class: 'btn primary small', onclick: async () => {
+            const wid = await db.add('workouts', { date: todayStr(), notes: '', templateName: t.name, plan: t.items });
+            await db.setMeta('currentWorkout', wid);
+            go('#training');
+          } }, '▶ Starten'),
+        ),
       ),
     );
     for (const it of t.items) {
@@ -830,10 +837,103 @@ async function renderPlans() {
   }
 
   wrap.appendChild(h('button', { class: 'btn ghost', onclick: async () => {
-    if (confirm(L('Plan neu installieren? Vorhandene Vorlagen dieses Plans werden ersetzt (deine Trainingsdaten bleiben erhalten).'))) {
+    if (confirm(L('Plan auf den Ausgangszustand zurücksetzen? Deine eigenen Änderungen an den Plänen gehen dabei verloren (deine Trainingsdaten bleiben erhalten).'))) {
       await installPlan(db); route();
     }
-  } }, 'Plan zurücksetzen / aktualisieren'));
+  } }, 'Plan auf Original zurücksetzen'));
+  return wrap;
+}
+
+// Plan-Editor: einen Trainingstag (Vorlage) anpassen – Name, Übungen,
+// Schema, Pause, Notiz; Übungen hinzufügen, entfernen, umsortieren.
+async function renderPlanEdit(templateId) {
+  const t = await db.get('templates', templateId);
+  const exercises = [...await db.all('exercises')].sort((a, b) => a.name.localeCompare(b.name));
+  const wrap = h('div', { class: 'view' });
+  wrap.appendChild(h('a', { class: 'back', href: '#plaene' }, tr('‹ Zurück zu Trainingspläne', '‹ Back to plans')));
+
+  if (!t) {
+    wrap.appendChild(h('div', { class: 'card' }, h('p', { class: 'muted' }, tr('Plan nicht gefunden.', 'Plan not found.'))));
+    return wrap;
+  }
+  if (!exercises.length) {
+    wrap.appendChild(h('div', { class: 'card' }, h('p', { class: 'muted' },
+      tr('Erst eine Übung anlegen (unter „Übungen").', 'Add an exercise first (under “Exercises”).'))));
+    return wrap;
+  }
+
+  wrap.appendChild(h('h1', {}, tr('Plan bearbeiten', 'Edit plan')));
+
+  // Arbeitskopie der Übungen dieses Tages.
+  let items = (t.items || []).map((x) => ({ ...x }));
+  const defExId = exercises[0].id;
+
+  const nameInp = h('input', { class: 'inp', value: t.name });
+  wrap.appendChild(h('div', { class: 'card' },
+    h('label', { class: 'field' }, h('span', {}, tr('Name des Trainingstags', 'Name of the day')), nameInp)));
+
+  const listCard = h('div', { class: 'card' }, h('h2', {}, tr('Übungen', 'Exercises')));
+  const listBox = h('div', {});
+  listCard.appendChild(listBox);
+
+  function renderList() {
+    clear(listBox);
+    if (!items.length) {
+      listBox.appendChild(h('p', { class: 'muted small' }, tr('Noch keine Übung. Unten hinzufügen.', 'No exercise yet. Add one below.')));
+    }
+    items.forEach((it, i) => {
+      const exSel = h('select', { class: 'inp' },
+        ...exercises.map((e) => h('option', { value: e.id }, `${e.name} (${CAT_LABEL[e.category] || e.category})`)));
+      exSel.value = it.exerciseId != null ? it.exerciseId : defExId;
+      exSel.addEventListener('change', () => {
+        it.exerciseId = parseInt(exSel.value, 10);
+        const ex = exercises.find((e) => e.id === it.exerciseId);
+        it.exerciseName = ex ? ex.name : it.exerciseName;
+      });
+      const schemeInp = h('input', { class: 'inp', value: it.scheme || '', placeholder: tr('z.B. 3×8-10', 'e.g. 3×8-10') });
+      schemeInp.addEventListener('input', () => { it.scheme = schemeInp.value; });
+      const restInp = h('input', { class: 'inp', value: it.rest || '', placeholder: tr('z.B. 90s', 'e.g. 90s') });
+      restInp.addEventListener('input', () => { it.rest = restInp.value; });
+      const noteInp = h('input', { class: 'inp', value: it.note || '', placeholder: tr('Notiz (optional)', 'Note (optional)') });
+      noteInp.addEventListener('input', () => { it.note = noteInp.value.trim() || null; });
+
+      const up = h('button', { class: 'btn ghost small', onclick: () => { if (i > 0) { [items[i - 1], items[i]] = [items[i], items[i - 1]]; renderList(); } } }, '↑');
+      const down = h('button', { class: 'btn ghost small', onclick: () => { if (i < items.length - 1) { [items[i + 1], items[i]] = [items[i], items[i + 1]]; renderList(); } } }, '↓');
+      const del = h('button', { class: 'btn ghost small danger', onclick: () => { items.splice(i, 1); renderList(); } }, '✕');
+
+      listBox.appendChild(h('div', { class: 'card', style: 'background:var(--bg-elev); margin-bottom:12px' },
+        h('div', { class: 'chart-head' },
+          h('span', { class: 'muted small' }, `#${i + 1}`),
+          h('div', { class: 'seg' }, up, down, del),
+        ),
+        h('label', { class: 'field' }, h('span', {}, tr('Übung', 'Exercise')), exSel),
+        h('div', { class: 'field-row' },
+          h('label', { class: 'field' }, h('span', {}, tr('Schema (Sätze×Wdh.)', 'Scheme (sets×reps)')), schemeInp),
+          h('label', { class: 'field' }, h('span', {}, tr('Pause', 'Rest')), restInp),
+        ),
+        h('label', { class: 'field' }, h('span', {}, tr('Notiz', 'Note')), noteInp),
+      ));
+    });
+  }
+  renderList();
+
+  listCard.appendChild(h('button', { class: 'btn ghost', onclick: () => {
+    const ex = exercises[0];
+    items.push({ exerciseId: ex.id, exerciseName: ex.name, scheme: '3×8-10', rest: '90s', note: null });
+    renderList();
+  } }, tr('+ Übung hinzufügen', '+ Add exercise')));
+  wrap.appendChild(listCard);
+
+  wrap.appendChild(h('button', { class: 'btn primary', onclick: async () => {
+    const clean = items.map((it) => {
+      const ex = exercises.find((e) => e.id === it.exerciseId) || exercises[0];
+      return { exerciseId: ex.id, exerciseName: ex.name, scheme: (it.scheme || '').trim() || '3×8-10', rest: (it.rest || '').trim() || '90s', note: it.note || null };
+    });
+    await db.put('templates', { ...t, name: nameInp.value.trim() || t.name, items: clean });
+    toast(tr('Plan gespeichert ✓', 'Plan saved ✓'));
+    go('#plaene');
+  } }, tr('✓ Speichern', '✓ Save')));
+
   return wrap;
 }
 
