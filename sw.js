@@ -1,5 +1,5 @@
 // sw.js — Service Worker: App offline verfügbar machen.
-const CACHE = 'kraft-tracker-v12';
+const CACHE = 'kraft-tracker-v13';
 const ASSETS = [
   './',
   './index.html',
@@ -25,6 +25,11 @@ const ASSETS = [
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+});
+
+// Erlaubt der App, eine wartende neue Version sofort zu aktivieren.
+self.addEventListener('message', (e) => {
+  if (e.data === 'skip-waiting') self.skipWaiting();
 });
 
 self.addEventListener('activate', (e) => {
