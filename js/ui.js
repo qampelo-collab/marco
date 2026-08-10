@@ -272,7 +272,7 @@ async function renderTraining() {
     const qDate = h('input', { type: 'date', value: todayStr(), class: 'inp' });
     const qEx = h('select', { class: 'inp' },
       ...exercises.map((e) => h('option', { value: e.id }, `${e.name} (${CAT_LABEL[e.category] || e.category})`)));
-    const qWeight = h('input', { type: 'number', step: '0.5', inputmode: 'decimal', class: 'inp', placeholder: 'kg' });
+    const qWeight = h('input', { type: 'number', step: '0.5', inputmode: 'decimal', class: 'inp', placeholder: tr('kg (0 = Körpergewicht)', 'kg (0 = bodyweight)') });
     const qReps = h('input', { type: 'number', step: '1', inputmode: 'numeric', class: 'inp', placeholder: tr('Wdh.', 'Reps') });
     const qPhotoInp = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'inp-file' });
     const qPreview = h('div', { class: 'photo-preview' });
@@ -356,8 +356,9 @@ async function renderTraining() {
       qAll,
       h('div', { class: 'muted small', style: 'margin:8px 0 2px' }, tr('… oder einzelnen Satz:', '… or a single set:')),
       h('button', { class: 'btn primary', onclick: async () => {
-        const w = parseFloat(qWeight.value), r = parseInt(qReps.value, 10);
-        if (!(w > 0) || !(r > 0)) { alert(tr('Bitte Gewicht und Wiederholungen eingeben.', 'Please enter weight and reps.')); return; }
+        let w = parseFloat(qWeight.value); if (isNaN(w)) w = 0;   // leer = Körpergewicht
+        const r = parseInt(qReps.value, 10);
+        if (w < 0 || !(r > 0)) { alert(tr('Bitte Gewicht und Wiederholungen eingeben.', 'Please enter weight and reps.')); return; }
         const wid = await db.add('workouts', { date: qDate.value || todayStr(), notes: '' });
         await db.add('sets', { workoutId: wid, exerciseId: parseInt(qEx.value, 10), weight: w, reps: r, rpe: null, photo: qPhoto || null, ts: Date.now() });
         toast(tr('Gespeichert ✓ – nächstes', 'Saved ✓ — next'));
@@ -455,7 +456,7 @@ async function renderTraining() {
   // Eingabemaske Satz
   const exSel = h('select', { class: 'inp' },
     ...exercises.map((e) => h('option', { value: e.id }, `${e.name} (${CAT_LABEL[e.category] || e.category})`)));
-  const weightInp = h('input', { type: 'number', step: '0.5', inputmode: 'decimal', class: 'inp', placeholder: 'kg' });
+  const weightInp = h('input', { type: 'number', step: '0.5', inputmode: 'decimal', class: 'inp', placeholder: tr('kg (0 = Körpergewicht)', 'kg (0 = bodyweight)') });
   const repsInp = h('input', { type: 'number', step: '1', inputmode: 'numeric', class: 'inp', placeholder: 'Wdh.' });
   const rpeInp = h('input', { type: 'number', step: '0.5', min: '1', max: '10', inputmode: 'decimal', class: 'inp', placeholder: 'RPE (opt.)' });
   const photoInp = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'inp-file' });
@@ -566,9 +567,10 @@ async function renderTraining() {
     aiBtn,
     aiResult,
     h('button', { class: 'btn primary', onclick: async () => {
-      const weight = parseFloat(weightInp.value);
+      let weight = parseFloat(weightInp.value);
+      if (isNaN(weight)) weight = 0;              // leer = Körpergewicht (0 kg)
       const reps = parseInt(repsInp.value, 10);
-      if (!(weight > 0) || !(reps > 0)) { alert(L('Bitte Gewicht und Wiederholungen eingeben.')); return; }
+      if (weight < 0 || !(reps > 0)) { alert(L('Bitte Gewicht und Wiederholungen eingeben.')); return; }
       const exId = parseInt(exSel.value, 10);
       // Bestwert VOR diesem Satz merken → Rekord-Erkennung.
       const prevBest = bestE1rm(enriched.filter((s) => s.exerciseId === exId), FORMULA).value;
@@ -597,25 +599,64 @@ async function renderTraining() {
   wrap.appendChild(form);
   prefillFromLast(false);
 
-  // Liste der Sätze dieser Einheit
+  // Liste der Sätze dieser Einheit — jeder Satz ist nachträglich editierbar
+  // (Übung/Gewicht/Wdh.), ohne dass eine Pause gestartet wird.
   const listCard = h('div', { class: 'card' }, h('h2', {}, `Sätze dieser Einheit (${sets.length})`));
   if (sets.length === 0) {
     listCard.appendChild(h('p', { class: 'muted' }, 'Noch keine Sätze erfasst.'));
   } else {
     for (const s of sets) {
-      const ex = eById.get(s.exerciseId);
-      listCard.appendChild(h('div', { class: 'set-item' },
-        s.photo ? h('img', { class: 'set-thumb', src: s.photo, onclick: () => showPhoto(s.photo) }) : h('div', { class: 'set-thumb empty' }, '—'),
-        h('div', { class: 'set-main' },
-          h('strong', {}, ex ? ex.name : '?'),
-          h('div', { class: 'muted small' }, `${s.weight} kg × ${s.reps}${s.rpe ? ' · RPE ' + s.rpe : ''} · e1RM ${round1(e1rm(s.weight, s.reps, FORMULA))} kg`),
-        ),
-        h('button', { class: 'btn ghost small danger', onclick: async () => { await db.delete('sets', s.id); route(); } }, '✕'),
-      ));
+      listCard.appendChild(makeSetRow(s));
     }
   }
   wrap.appendChild(listCard);
   return wrap;
+
+  // Baut eine Satz-Zeile mit Anzeige- und Bearbeiten-Modus.
+  function makeSetRow(s) {
+    const row = h('div', { class: 'set-item' });
+    const showView = () => {
+      clear(row);
+      const ex = eById.get(s.exerciseId);
+      row.appendChild(s.photo
+        ? h('img', { class: 'set-thumb', src: s.photo, onclick: () => showPhoto(s.photo) })
+        : h('div', { class: 'set-thumb empty' }, '—'));
+      row.appendChild(h('div', { class: 'set-main' },
+        h('strong', {}, ex ? ex.name : '?'),
+        h('div', { class: 'muted small' }, `${s.weight} kg × ${s.reps}${s.rpe ? ' · RPE ' + s.rpe : ''} · e1RM ${round1(e1rm(s.weight, s.reps, FORMULA))} kg`),
+      ));
+      row.appendChild(h('button', { class: 'btn ghost small', onclick: showEdit, title: tr('Bearbeiten', 'Edit') }, '✎'));
+      row.appendChild(h('button', { class: 'btn ghost small danger', onclick: async () => { await db.delete('sets', s.id); route(); } }, '✕'));
+    };
+    const showEdit = () => {
+      clear(row);
+      const exE = h('select', { class: 'inp' },
+        ...exercises.map((e) => h('option', { value: e.id }, `${e.name} (${CAT_LABEL[e.category] || e.category})`)));
+      exE.value = s.exerciseId;
+      const wE = h('input', { type: 'number', step: '0.5', inputmode: 'decimal', class: 'inp', value: s.weight,
+        placeholder: tr('kg (0 = Körpergewicht)', 'kg (0 = bodyweight)') });
+      const rE = h('input', { type: 'number', step: '1', inputmode: 'numeric', class: 'inp', value: s.reps, placeholder: tr('Wdh.', 'Reps') });
+      row.appendChild(h('div', { class: 'set-main', style: 'width:100%' },
+        exE,
+        h('div', { class: 'field-row', style: 'margin-top:8px' },
+          h('label', { class: 'field' }, h('span', {}, tr('Gewicht', 'Weight')), wE),
+          h('label', { class: 'field' }, h('span', {}, tr('Wiederholungen', 'Reps')), rE),
+        ),
+        h('div', { class: 'seg', style: 'margin-top:4px' },
+          h('button', { class: 'btn primary small', onclick: async () => {
+            let w = parseFloat(wE.value); if (isNaN(w)) w = 0;
+            const r = parseInt(rE.value, 10);
+            if (w < 0 || !(r > 0)) { alert(L('Bitte Gewicht und Wiederholungen eingeben.')); return; }
+            await db.put('sets', { ...s, exerciseId: parseInt(exE.value, 10), weight: w, reps: r });
+            route();   // kein startRest → keine erzwungene Pause beim Korrigieren
+          } }, tr('✓ Speichern', '✓ Save')),
+          h('button', { class: 'btn ghost small', onclick: showView }, tr('Abbrechen', 'Cancel')),
+        ),
+      ));
+    };
+    showView();
+    return row;
+  }
 }
 
 // ==================================================================
