@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v42';
+const APP_VERSION = 'v43';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -1810,15 +1810,43 @@ async function renderSettings() {
   ));
 
   // Backup
+  const taOut = h('textarea', { class: 'inp', rows: '4', readonly: '', placeholder: tr('Hier erscheint dein Backup-Text …', 'Your backup text appears here …') });
+  const taIn = h('textarea', { class: 'inp', rows: '4', placeholder: tr('Backup-Text hier einfügen …', 'Paste backup text here …') });
   wrap.appendChild(h('div', { class: 'card' },
     h('h2', {}, 'Backup'),
     h('p', { class: 'muted small' }, tr(
-      'Alle Daten liegen lokal auf diesem Gerät. Sichere sie regelmäßig als Datei.',
-      'All data is stored locally on this device. Back it up regularly as a file.')),
-    h('p', { class: 'muted small' }, tr(
-      'Wichtig (iPhone): Die App im Safari und die zum Home-Bildschirm hinzugefügte App haben getrennte Speicher. Zum Übertragen: im Safari exportieren, in der Home-App importieren.',
-      'Note (iPhone): the app in Safari and the one added to the home screen use separate storage. To transfer: export in Safari, import in the home-screen app.')),
-    h('button', { class: 'btn primary', onclick: exportBackup }, '⬇ Backup exportieren (JSON)'),
+      'Wichtig (iPhone): Die App im Safari und die zum Home-Bildschirm hinzugefügte App haben getrennte Speicher. Zum Übertragen: im Safari kopieren, in der Home-App einfügen.',
+      'Note (iPhone): Safari and the home-screen app use separate storage. To transfer: copy in Safari, paste in the home-screen app.')),
+
+    // Weg 1 (empfohlen, ohne Datei): per Text kopieren & einfügen.
+    h('h2', { style: 'font-size:14px; margin-top:6px' }, tr('📋 Per Text übertragen (empfohlen)', '📋 Transfer via text (recommended)')),
+    h('p', { class: 'muted small' }, tr('Ohne Fotos, damit der Text klein bleibt. Zahlen/Trainings/Maße sind alle dabei.',
+      'Without photos so the text stays small. All numbers/workouts/measures are included.')),
+    h('button', { class: 'btn primary', onclick: async () => {
+      const dump = await exportAll();
+      if (dump.data && Array.isArray(dump.data.sets)) dump.data.sets = dump.data.sets.map(({ photo, ...r }) => r);
+      const json = JSON.stringify(dump);
+      taOut.value = json;
+      taOut.focus(); taOut.select();
+      try { await navigator.clipboard.writeText(json); toast(tr('Backup kopiert ✓ – jetzt in der anderen App einfügen', 'Backup copied ✓ — paste it in the other app')); }
+      catch { toast(tr('Text unten ist markiert – mit „Kopieren" sichern', 'Text below is selected — tap “Copy”')); }
+    } }, tr('Backup-Text erzeugen & kopieren', 'Create & copy backup text')),
+    taOut,
+    h('label', { class: 'field', style: 'margin-top:10px' }, h('span', {}, tr('Backup-Text einfügen und importieren', 'Paste backup text and import')), taIn),
+    h('button', { class: 'btn ghost', onclick: async () => {
+      const txt = taIn.value.trim();
+      if (!txt) { alert(tr('Bitte zuerst den Backup-Text einfügen.', 'Please paste the backup text first.')); return; }
+      if (!confirm(L('Import ersetzt die aktuellen Daten. Fortfahren?'))) return;
+      try {
+        await importAll(JSON.parse(txt), { replace: true });
+        alert(L('Backup importiert.'));
+        location.hash = '#dashboard'; route();
+      } catch (err) { alert(L('Import fehlgeschlagen: ') + err.message); }
+    } }, tr('Aus Text importieren', 'Import from text')),
+
+    // Weg 2: als Datei (inkl. Fotos).
+    h('h2', { style: 'font-size:14px; margin-top:16px' }, tr('📄 Als Datei (inkl. Fotos)', '📄 As a file (incl. photos)')),
+    h('button', { class: 'btn ghost', onclick: exportBackup }, '⬇ Backup exportieren (JSON)'),
     h('label', { class: 'btn ghost file-btn' }, '⬆ Backup importieren',
       h('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onchange: importBackup })),
   ));
