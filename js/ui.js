@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v31';
+const APP_VERSION = 'v32';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -303,6 +303,9 @@ async function renderTraining() {
   if (!current) {
     // ============ HAUPTWEG: Training aus Foto der Notizen ============
     const qDate = h('input', { type: 'date', value: todayStr(), class: 'inp' });
+    // Datumsfeld bleibt ausgeblendet – erscheint nur, wenn das Foto kein Datum liefert.
+    const qDateBox = h('label', { class: 'field', style: 'display:none; margin-top:12px' },
+      h('span', {}, tr('📅 Datum (im Foto nicht erkannt – bitte eintragen)', '📅 Date (not found in photo — please enter)')), qDate);
     const qPhotoInp = h('input', { type: 'file', accept: 'image/*', capture: 'environment', style: 'display:none' });
     const qPreview = h('div', { class: 'photo-preview' });
     const qHint = h('div', { class: 'hint' }, '');
@@ -346,12 +349,14 @@ async function renderTraining() {
       try {
         const res = await extractSetsFromImage({ dataUrl: qPhoto, apiKey, model: visionModel, exerciseNames: exercises.map((e) => e.name) });
         qRecognized = res.sets || []; qRecName = res.name || null;
-        if (res.date) qDate.value = res.date;
+        if (res.date) { qDate.value = res.date; qDateBox.style.display = 'none'; }
         clear(qAll);
         if (qRecognized.length) {
+          if (!res.date) qDateBox.style.display = '';   // nur zeigen, wenn kein Datum erkannt
           qHint.textContent = (res.name ? res.name + ' · ' : '') +
             tr(`${qRecognized.length} Sätze erkannt`, `${qRecognized.length} sets recognized`) +
-            (res.date ? ' · ' + fmtDate(res.date) : '') + (res.note ? ' · ' + res.note : '');
+            (res.date ? ' · ' + fmtDate(res.date) : ' · ' + tr('Datum bitte unten eintragen', 'enter date below')) +
+            (res.note ? ' · ' + res.note : '');
           const list = h('div', { class: 'muted small', style: 'margin:6px 0' });
           for (const x of qRecognized) list.appendChild(h('div', {}, `• ${x.exercise || '?'} — ${x.weight ?? '?'} kg × ${x.reps ?? '?'}${x.tendency === '+' ? ' ＋' : x.tendency === '-' ? ' －' : ''}`));
           qAll.appendChild(list);
@@ -382,7 +387,7 @@ async function renderTraining() {
       qPreview,
       qHint,
       qAll,
-      h('label', { class: 'field', style: 'margin-top:12px' }, h('span', {}, tr('Datum (aus Foto)', 'Date (from photo)')), qDate),
+      qDateBox,
       reBtn,
     ));
 
