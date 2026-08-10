@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v39';
+const APP_VERSION = 'v40';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -107,6 +107,24 @@ export async function initUI() {
   setLang(lang === 'en' ? 'en' : 'de');
   applyTheme(await db.getMeta('theme', DEFAULT_THEME), await db.getMeta('accent', DEFAULT_ACCENT));
   window.addEventListener('hashchange', route);
+
+  // Bottom-Nav: immer die Startseite des Tabs zeigen. Ist gerade eine Einheit
+  // offen (Bearbeitung), vorher nachfragen und sie dann schließen.
+  document.querySelectorAll('.nav-item').forEach((el) => {
+    el.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const target = el.getAttribute('href');
+      const openSession = await db.getMeta('currentWorkout', null);
+      if (openSession != null) {
+        if (!confirm(tr('Aktuelle Einheit verlassen? Erfasste Sätze bleiben gespeichert.',
+          'Leave the current session? Logged sets stay saved.'))) return;
+        await db.setMeta('currentWorkout', null);
+      }
+      if (location.hash === target) route();   // schon hier → auf Start zurücksetzen
+      else location.hash = target;              // sonst per hashchange neu rendern
+    });
+  });
+
   route();
 }
 
