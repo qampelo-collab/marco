@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v20';
+const APP_VERSION = 'v21';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -80,9 +80,13 @@ const routes = {
 
 export async function initUI() {
   FORMULA = await db.getMeta('formula', 'epley');
-  let lang = await db.getMeta('lang', null);
-  if (!lang) { lang = detectLang(); await db.setMeta('lang', lang); }
-  setLang(lang);
+  // Standard ist Deutsch. Englisch nur, wenn der Nutzer es aktiv wählt
+  // (unter „Mehr" → Sprache). Kein automatisches Umschalten nach Handysprache
+  // mehr – das führte zu einem gemischten DE/EN-Erscheinungsbild.
+  const langChosen = await db.getMeta('langChosen', false);
+  let lang = await db.getMeta('lang', 'de');
+  if (!langChosen) { lang = 'de'; await db.setMeta('lang', 'de'); }
+  setLang(lang === 'en' ? 'en' : 'de');
   applyTheme(await db.getMeta('theme', DEFAULT_THEME), await db.getMeta('accent', DEFAULT_ACCENT));
   window.addEventListener('hashchange', route);
   route();
@@ -1276,8 +1280,8 @@ async function renderSettings() {
   const curLang = getLang();
   const deBtn = h('button', { class: 'btn ghost' + (curLang !== 'en' ? ' on' : '') }, 'Deutsch');
   const enBtn = h('button', { class: 'btn ghost' + (curLang === 'en' ? ' on' : '') }, 'English');
-  deBtn.onclick = async () => { await db.setMeta('lang', 'de'); setLang('de'); route(); };
-  enBtn.onclick = async () => { await db.setMeta('lang', 'en'); setLang('en'); route(); };
+  deBtn.onclick = async () => { await db.setMeta('lang', 'de'); await db.setMeta('langChosen', true); setLang('de'); route(); };
+  enBtn.onclick = async () => { await db.setMeta('lang', 'en'); await db.setMeta('langChosen', true); setLang('en'); route(); };
 
   wrap.appendChild(h('div', { class: 'card' },
     h('h2', {}, '🎨 Aussehen'),
