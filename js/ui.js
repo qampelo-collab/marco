@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v30';
+const APP_VERSION = 'v31';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -665,7 +665,6 @@ async function renderTraining() {
     h('button', { class: 'btn ghost big-pause', onclick: () => startRest(restSecondsFor(parseInt(exSel.value, 10))) },
       '⏱ Pause starten'),
   );
-  wrap.appendChild(form);
   prefillFromLast(false);
 
   // Liste der Sätze dieser Einheit — nach Übung gruppiert (wie auf deinen
@@ -696,6 +695,12 @@ async function renderTraining() {
     }
   }
   wrap.appendChild(listCard);
+
+  // „Satz hinzufügen" ist beim Öffnen einer Einheit zweitrangig → eingeklappt.
+  wrap.appendChild(h('details', { class: 'manual-details' },
+    h('summary', {}, tr('➕ Satz hinzufügen / aus Foto', '➕ Add a set / from photo')),
+    form,
+  ));
   return wrap;
 
   // Baut eine Satz-Zeile mit Anzeige- und Bearbeiten-Modus.
