@@ -56,7 +56,7 @@ function buildPrompt(exerciseNames) {
 export function buildRequestBody({ base64, mediaType, model, exerciseNames }) {
   return {
     model: model || DEFAULT_VISION_MODEL,
-    max_tokens: 1024,
+    max_tokens: 4096,
     messages: [
       {
         role: 'user',
@@ -94,7 +94,14 @@ export function parseResponse(apiJson) {
   try {
     data = JSON.parse(cleaned);
   } catch (e) {
-    throw new Error(pick('Antwort der KI war kein gültiges JSON.', 'The AI response was not valid JSON.'));
+    // Rettung bei abgeschnittener/unvollständiger Antwort: einzelne Satz-Objekte extrahieren.
+    const objs = cleaned.match(/\{[^{}]*\}/g) || [];
+    const salvaged = [];
+    for (const o of objs) {
+      try { const pj = JSON.parse(o); if ('weight' in pj || 'reps' in pj || 'exercise' in pj) salvaged.push(pj); } catch { /* skip */ }
+    }
+    if (salvaged.length) data = { sets: salvaged, note: null };
+    else throw new Error(pick('Antwort der KI war kein gültiges JSON.', 'The AI response was not valid JSON.'));
   }
 
   const rawSets = Array.isArray(data.sets) ? data.sets : [];
