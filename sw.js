@@ -1,5 +1,5 @@
 // sw.js — Service Worker: App offline verfügbar machen.
-const CACHE = 'kraft-tracker-v11';
+const CACHE = 'kraft-tracker-v12';
 const ASSETS = [
   './',
   './index.html',
@@ -34,18 +34,20 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// Cache-first für App-Dateien, Netzwerk-Fallback.
+// Network-first für App-Dateien (gleiche Herkunft): online immer die neueste
+// Version, offline Fallback aus dem Cache. Fremde Hosts (z.B. Anthropic-API)
+// werden nicht angefasst.
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
+  if (new URL(req.url).origin !== location.origin) return;
   e.respondWith(
-    caches.match(req).then((cached) => cached || fetch(req).then((res) => {
-      // Neue gleiche-Herkunft-Antworten opportunistisch cachen.
-      if (res.ok && new URL(req.url).origin === location.origin) {
+    fetch(req).then((res) => {
+      if (res && res.ok) {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(req, copy));
       }
       return res;
-    }).catch(() => cached))
+    }).catch(() => caches.match(req).then((cached) => cached || caches.match('./index.html')))
   );
 });
