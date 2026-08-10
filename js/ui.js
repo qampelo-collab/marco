@@ -1,7 +1,7 @@
 // ui.js — Oberfläche: Router + alle Ansichten.
 
 import { db, exportAll, importAll } from './db.js';
-import { e1rm, progression, dayKey, totalVolume, weeklyVolumeByCategory, round1, bestE1rm } from './calc.js';
+import { e1rm, progression, dayKey, totalVolume, weeklyVolumeByCategory, round1, bestE1rm, navyBodyFat } from './calc.js';
 import { buildSuggestions } from './coach.js';
 import { lineChart, barChart } from './charts.js';
 import { extractSetsFromImage, VISION_MODELS, DEFAULT_VISION_MODEL } from './vision.js';
@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v24';
+const APP_VERSION = 'v25';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -1174,33 +1174,75 @@ async function renderBody() {
   const shoulderI = h('input', { type: 'number', step: '0.1', class: 'inp', placeholder: 'cm' });
   const chestI = h('input', { type: 'number', step: '0.1', class: 'inp', placeholder: 'cm' });
   const waistI = h('input', { type: 'number', step: '0.1', class: 'inp', placeholder: 'cm' });
+  const neckI = h('input', { type: 'number', step: '0.1', class: 'inp', placeholder: 'cm' });
   const armI = h('input', { type: 'number', step: '0.1', class: 'inp', placeholder: 'cm' });
   const thighI = h('input', { type: 'number', step: '0.1', class: 'inp', placeholder: 'cm' });
+  const bfI = h('input', { type: 'number', step: '0.1', inputmode: 'decimal', class: 'inp', placeholder: tr('% (leer = aus Maßen schätzen)', '% (empty = estimate from measures)') });
+
+  // Körpergröße + Geschlecht einmalig (aus Meta), für die KFA-Schätzung.
+  const heightVal = parseFloat(await db.getMeta('height', '')) || '';
+  const sexVal = await db.getMeta('sex', 'male');
+  const heightI = h('input', { type: 'number', step: '0.5', inputmode: 'decimal', class: 'inp', placeholder: 'cm', value: heightVal });
+  heightI.addEventListener('change', async () => { const v = parseFloat(heightI.value); await db.setMeta('height', v > 0 ? v : ''); });
+  const sexSel = h('select', { class: 'inp' },
+    h('option', { value: 'male', ...(sexVal !== 'female' ? { selected: '' } : {}) }, tr('männlich', 'male')),
+    h('option', { value: 'female', ...(sexVal === 'female' ? { selected: '' } : {}) }, tr('weiblich', 'female')));
+  sexSel.addEventListener('change', () => db.setMeta('sex', sexSel.value));
+
+  const bfHint = h('div', { class: 'hint' }, '');
+  const estimateBf = () => navyBodyFat({
+    sex: sexSel.value,
+    waist: parseFloat(waistI.value),
+    neck: parseFloat(neckI.value),
+    heightCm: parseFloat(heightI.value),
+  });
+  const updateBfHint = () => {
+    if (bfI.value) { bfHint.textContent = ''; return; }
+    const est = estimateBf();
+    bfHint.textContent = est != null
+      ? tr(`Geschätzt (US-Navy): ${est} % Körperfett`, `Estimated (US Navy): ${est} % body fat`)
+      : tr('Für die Schätzung: Größe, Taille und Nacken ausfüllen.', 'For the estimate: fill in height, waist and neck.');
+  };
+  [waistI, neckI, heightI, bfI].forEach((i) => i.addEventListener('input', updateBfHint));
+  sexSel.addEventListener('change', updateBfHint);
+  updateBfHint();
 
   wrap.appendChild(h('div', { class: 'card' },
     h('h2', {}, 'Neuer Eintrag'),
     h('label', { class: 'field' }, h('span', {}, 'Datum'), dateI),
     h('label', { class: 'field' }, h('span', {}, 'Körpergewicht (kg)'), wI),
     h('div', { class: 'field-row' },
+      h('label', { class: 'field' }, h('span', {}, tr('Körpergröße (cm, einmalig)', 'Height (cm, one-time)')), heightI),
+      h('label', { class: 'field' }, h('span', {}, tr('Geschlecht (für Schätzung)', 'Sex (for estimate)')), sexSel),
+    ),
+    h('div', { class: 'field-row' },
       h('label', { class: 'field' }, h('span', {}, 'Schulter'), shoulderI),
       h('label', { class: 'field' }, h('span', {}, 'Brust'), chestI),
     ),
     h('div', { class: 'field-row' },
       h('label', { class: 'field' }, h('span', {}, 'Taille'), waistI),
-      h('label', { class: 'field' }, h('span', {}, 'Arm'), armI),
+      h('label', { class: 'field' }, h('span', {}, 'Nacken'), neckI),
     ),
     h('div', { class: 'field-row' },
+      h('label', { class: 'field' }, h('span', {}, 'Arm'), armI),
       h('label', { class: 'field' }, h('span', {}, 'Oberschenkel'), thighI),
-      h('label', { class: 'field' }),
     ),
+    h('label', { class: 'field' }, h('span', {}, tr('Körperfett % (optional)', 'Body fat % (optional)')), bfI),
+    bfHint,
     h('button', { class: 'btn primary', onclick: async () => {
       const weight = parseFloat(wI.value);
-      if (!(weight > 0) && !shoulderI.value && !chestI.value && !waistI.value) { alert(L('Bitte mindestens einen Wert eingeben.')); return; }
+      const bfManual = parseFloat(bfI.value);
+      const bf = !isNaN(bfManual) ? round1(bfManual) : estimateBf();
+      if (!(weight > 0) && !shoulderI.value && !waistI.value && !neckI.value && !(bf != null)) {
+        alert(L('Bitte mindestens einen Wert eingeben.')); return;
+      }
       await db.add('body', {
         date: dateI.value || todayStr(),
         weight: weight || null,
         shoulder: num(shoulderI.value),
-        chest: num(chestI.value), waist: num(waistI.value), arm: num(armI.value), thigh: num(thighI.value),
+        chest: num(chestI.value), waist: num(waistI.value), neck: num(neckI.value),
+        arm: num(armI.value), thigh: num(thighI.value),
+        bodyfat: bf != null ? bf : null,
       });
       route();
     } }, '+ Speichern'),
@@ -1209,13 +1251,16 @@ async function renderBody() {
   if (rows.length >= 2) {
     const series = [...rows].reverse().filter((r) => r.weight).map((r) => ({ date: r.date, value: r.weight }));
     if (series.length >= 2) wrap.appendChild(h('div', { class: 'card' }, h('h2', {}, '⚖️ Gewichtsverlauf'), lineChart(series, { color: '#60a5fa' })));
+    const bfSeries = [...rows].reverse().filter((r) => r.bodyfat).map((r) => ({ date: r.date, value: r.bodyfat }));
+    if (bfSeries.length >= 2) wrap.appendChild(h('div', { class: 'card' }, h('h2', {}, tr('📉 Körperfett-Verlauf', '📉 Body-fat trend')), lineChart(bfSeries, { color: '#f472b6' })));
   }
 
   const list = h('div', { class: 'card' }, h('h2', {}, 'Einträge'));
   if (!rows.length) list.appendChild(h('p', { class: 'muted' }, 'Noch keine Einträge.'));
   for (const r of rows.slice(0, 40)) {
-    const parts = [r.weight ? r.weight + ' kg' : null, r.shoulder ? 'Schulter ' + r.shoulder : null,
-      r.chest ? 'Brust ' + r.chest : null, r.waist ? 'Taille ' + r.waist : null,
+    const parts = [r.weight ? r.weight + ' kg' : null, r.bodyfat ? 'KFA ' + r.bodyfat + '%' : null,
+      r.shoulder ? 'Schulter ' + r.shoulder : null, r.chest ? 'Brust ' + r.chest : null,
+      r.waist ? 'Taille ' + r.waist : null, r.neck ? 'Nacken ' + r.neck : null,
       r.arm ? 'Arm ' + r.arm : null, r.thigh ? 'OSchenkel ' + r.thigh : null].filter(Boolean);
     list.appendChild(h('div', { class: 'set-item' },
       h('div', { class: 'set-main' }, h('strong', {}, fmtDate(r.date)), h('div', { class: 'muted small' }, parts.join(' · '))),

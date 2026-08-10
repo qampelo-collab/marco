@@ -120,6 +120,25 @@ export function totalVolume(sets) {
   return sets.reduce((sum, s) => sum + setVolume(s.weight, s.reps), 0);
 }
 
+// ---- Körperfett-Schätzung (US-Navy-Methode) ----
+// Nutzt Umfänge statt nur Gewicht/Größe (BMI) und ist damit aussagekräftiger.
+// Alle Maße in cm. Männer: Taille + Nacken + Größe. Frauen: + Hüfte.
+// Rückgabe: geschätzter Körperfett-Anteil in % (gerundet) oder null.
+export function navyBodyFat({ sex = 'male', waist, neck, hip, heightCm }) {
+  const w = Number(waist), n = Number(neck), h = Number(heightCm), hp = Number(hip);
+  if (!(h > 0) || !(w > 0) || !(n > 0)) return null;
+  let bf;
+  if (sex === 'female') {
+    if (!(hp > 0) || w + hp - n <= 0) return null;
+    bf = 495 / (1.29579 - 0.35004 * Math.log10(w + hp - n) + 0.22100 * Math.log10(h)) - 450;
+  } else {
+    if (w - n <= 0) return null; // Taille muss größer als Nacken sein
+    bf = 495 / (1.0324 - 0.19077 * Math.log10(w - n) + 0.15456 * Math.log10(h)) - 450;
+  }
+  if (!isFinite(bf) || bf <= 0 || bf > 70) return null;
+  return round1(bf);
+}
+
 // Pausenzeit aus einem Schema wie "90s", "90-120s", "120s" in Sekunden lesen.
 export function parseRestSeconds(rest) {
   const m = /(\d+)/.exec(rest || '');
