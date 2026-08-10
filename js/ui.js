@@ -15,6 +15,10 @@ import { parseRestSeconds } from './calc.js';
 const app = document.getElementById('app');
 let FORMULA = 'epley';
 
+// App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
+// Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
+const APP_VERSION = 'v16';
+
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
 
@@ -1215,8 +1219,34 @@ async function renderSettings() {
     } }, 'Alle Daten löschen'),
   ));
 
-  wrap.appendChild(h('p', { class: 'muted small center' }, 'Kraft-Tracker · lokal & offline · v1.0'));
+  // App-Version + manueller Update-Anstoß (Daten bleiben erhalten).
+  wrap.appendChild(h('div', { class: 'card' },
+    h('h2', {}, tr('App-Version', 'App version')),
+    h('p', { class: 'muted small' }, tr(
+      `Installierte Version: ${APP_VERSION}. Normalerweise aktualisiert sich die App von allein. Falls eine Änderung nicht erscheint, hier erzwingen – deine Daten bleiben erhalten.`,
+      `Installed version: ${APP_VERSION}. The app normally updates itself. If a change doesn't show up, force it here — your data stays intact.`)),
+    h('button', { class: 'btn primary', onclick: forceUpdate }, tr('🔄 Nach Update suchen & neu laden', '🔄 Check for update & reload')),
+  ));
+
+  wrap.appendChild(h('p', { class: 'muted small center' }, `Kraft-Tracker · lokal & offline · ${APP_VERSION}`));
   return wrap;
+}
+
+// Erzwingt die neueste Version: App-Cache leeren + Service Worker neu
+// registrieren, dann neu laden. IndexedDB (deine Trainingsdaten) bleibt
+// unangetastet.
+async function forceUpdate() {
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+  } catch (e) { /* egal – trotzdem neu laden */ }
+  location.reload();
 }
 
 async function exportBackup() {
