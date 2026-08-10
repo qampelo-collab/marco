@@ -78,21 +78,21 @@ export function buildSuggestions({ enrichedSets, exercises, body, nutrition, act
   if (push + pull + legs > 0) {
     if (pull > 0 && push > pull * 1.8) {
       out.push({ type: 'balance', level: 'tip',
-        title: pick('Balance: mehr Ziehen', 'Balance: more pulling'),
+        title: pick('Balance: mehr Pull', 'Balance: more pulling'),
         text: pick(
           'Diese Woche deutlich mehr Druck- als Zugvolumen. Für gesunde Schultern: mehr Rudern/Klimmzüge einplanen.',
           'Much more pushing than pulling volume this week. For healthy shoulders: add more rows/pull-ups.') });
     }
     if (push > 0 && pull > push * 1.8) {
       out.push({ type: 'balance', level: 'tip',
-        title: pick('Balance: mehr Drücken', 'Balance: more pushing'),
+        title: pick('Balance: mehr Push', 'Balance: more pushing'),
         text: pick(
           'Zugvolumen dominiert. Ein zusätzlicher Druck-Tag (Bank/Schulter) bringt die Balance zurück.',
           'Pulling volume dominates. An extra push day (bench/shoulders) restores the balance.') });
     }
     if (legs < (push + pull) * 0.3) {
       out.push({ type: 'balance', level: 'tip',
-        title: pick('Beine nicht vergessen', 'Don’t forget legs'),
+        title: pick('Legs nicht vergessen', 'Don’t forget legs'),
         text: pick(
           'Beinvolumen ist gering im Vergleich zum Oberkörper. Kniebeugen/Kreuzheben/Beinpresse ergänzen.',
           'Leg volume is low compared to upper body. Add squats/deadlifts/leg press.') });
