@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v37';
+const APP_VERSION = 'v38';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -964,7 +964,9 @@ async function renderExerciseDetail(id) {
   wrap.appendChild(h('a', { class: 'back', href: '#uebungen' }, '‹ Zurück zu Übungen'));
   wrap.appendChild(h('h1', {}, ex ? ex.name : 'Übung'));
 
-  // Übung bearbeiten (Name, Kategorie, Gerät, Pause) + löschen
+  // Übung bearbeiten (Name, Kategorie, Gerät, Pause) + löschen — eingeklappt,
+  // wird erst unten angehängt.
+  let editDetails = null;
   if (ex) {
     const nameE = h('input', { class: 'inp', value: ex.name });
     const catE = h('select', { class: 'inp' }, ...Object.entries(CAT_LABEL).map(([v, l]) => h('option', { value: v }, l)));
@@ -972,38 +974,40 @@ async function renderExerciseDetail(id) {
     const equipE = h('input', { class: 'inp', value: ex.equipment || '', placeholder: tr('Gerät (optional)', 'Equipment (optional)') });
     const restI = h('input', { type: 'number', step: '5', min: '0', inputmode: 'numeric', class: 'inp',
       value: ex.rest || '', placeholder: tr('Standard', 'default') });
-    wrap.appendChild(h('div', { class: 'card' },
-      h('h2', {}, tr('Übung bearbeiten', 'Edit exercise')),
-      h('label', { class: 'field' }, h('span', {}, tr('Name', 'Name')), nameE),
-      h('div', { class: 'field-row' },
-        h('label', { class: 'field' }, h('span', {}, tr('Kategorie', 'Category')), catE),
-        h('label', { class: 'field' }, h('span', {}, tr('Gerät', 'Equipment')), equipE),
-      ),
-      h('label', { class: 'field' }, h('span', {}, tr('⏱ Pause (Sek., leer = Standard)', '⏱ Rest (sec, empty = default)')), restI),
-      h('button', { class: 'btn primary', onclick: async () => {
-        const nm = nameE.value.trim();
-        if (!nm) { alert(L('Bitte Namen eingeben.')); return; }
-        ex.name = nm; ex.category = catE.value; ex.equipment = equipE.value.trim();
-        const rv = parseInt(restI.value, 10); ex.rest = rv > 0 ? rv : null;
-        await db.put('exercises', ex);
-        toast(tr('Gespeichert ✓', 'Saved ✓'));
-        route();
-      } }, tr('✓ Speichern', '✓ Save')),
-      h('button', { class: 'btn ghost danger', onclick: async () => {
-        const n = sets.length;
-        const msg = n
-          ? tr(`„${ex.name}" und ${n} zugehörige Sätze löschen?`, `Delete “${ex.name}” and its ${n} sets?`)
-          : tr(`„${ex.name}" löschen?`, `Delete “${ex.name}”?`);
-        if (!confirm(msg)) return;
-        if (n) { const all = await db.byIndex('sets', 'exerciseId', id); for (const s of all) await db.delete('sets', s.id); }
-        await db.delete('exercises', id);
-        location.hash = '#uebungen'; route();
-      } }, tr('🗑 Übung löschen', '🗑 Delete exercise')),
-    ));
+    editDetails = h('details', { class: 'manual-details' },
+      h('summary', {}, tr('✏️ Übung bearbeiten', '✏️ Edit exercise')),
+      h('div', { class: 'card', style: 'margin-top:10px' },
+        h('label', { class: 'field' }, h('span', {}, tr('Name', 'Name')), nameE),
+        h('div', { class: 'field-row' },
+          h('label', { class: 'field' }, h('span', {}, tr('Kategorie', 'Category')), catE),
+          h('label', { class: 'field' }, h('span', {}, tr('Gerät', 'Equipment')), equipE),
+        ),
+        h('label', { class: 'field' }, h('span', {}, tr('⏱ Pause (Sek., leer = Standard)', '⏱ Rest (sec, empty = default)')), restI),
+        h('button', { class: 'btn primary', onclick: async () => {
+          const nm = nameE.value.trim();
+          if (!nm) { alert(L('Bitte Namen eingeben.')); return; }
+          ex.name = nm; ex.category = catE.value; ex.equipment = equipE.value.trim();
+          const rv = parseInt(restI.value, 10); ex.rest = rv > 0 ? rv : null;
+          await db.put('exercises', ex);
+          toast(tr('Gespeichert ✓', 'Saved ✓'));
+          route();
+        } }, tr('✓ Speichern', '✓ Save')),
+        h('button', { class: 'btn ghost danger', onclick: async () => {
+          const n = sets.length;
+          const msg = n
+            ? tr(`„${ex.name}" und ${n} zugehörige Sätze löschen?`, `Delete “${ex.name}” and its ${n} sets?`)
+            : tr(`„${ex.name}" löschen?`, `Delete “${ex.name}”?`);
+          if (!confirm(msg)) return;
+          if (n) { const all = await db.byIndex('sets', 'exerciseId', id); for (const s of all) await db.delete('sets', s.id); }
+          await db.delete('exercises', id);
+          location.hash = '#uebungen'; route();
+        } }, tr('🗑 Übung löschen', '🗑 Delete exercise')),
+      ));
   }
 
-  // 🔀 Sätze ab einem Datum in eine andere/neue Übung verschieben
-  // (z.B. Wechsel Kurzhantel → Langhantel sauber trennen).
+  // 🔀 Sätze ab einem Datum in eine andere/neue Übung verschieben — eingeklappt,
+  // wird ganz unten angehängt.
+  let bulkDetails = null;
   if (ex && sets.length) {
     const latestDate = sets.map((s) => s.date).filter(Boolean).sort().pop() || todayStr();
     const fromInp = h('input', { type: 'date', class: 'inp', value: latestDate });
@@ -1030,49 +1034,78 @@ async function renderExerciseDetail(id) {
     };
     fromInp.addEventListener('change', updateMoveHint); updateMoveHint();
 
+    bulkDetails = h('details', { class: 'manual-details' },
+      h('summary', {}, tr('🔀 Sätze in andere Übung verschieben', '🔀 Move sets to another exercise')),
+      h('div', { class: 'card', style: 'margin-top:10px' },
+        h('p', { class: 'muted small' }, tr(
+          'Verschiebt alle Sätze dieser Übung ab dem gewählten Datum in eine andere (oder neue) Übung – z.B. beim Wechsel Kurzhantel → Langhantel, damit die Progression sauber getrennt bleibt.',
+          'Moves all sets of this exercise from the chosen date on into another (or new) exercise — e.g. when switching dumbbell → barbell, to keep the progression clean.')),
+        h('label', { class: 'field' }, h('span', {}, tr('Ab Datum (inkl.)', 'From date (incl.)')), fromInp),
+        h('label', { class: 'field' }, h('span', {}, tr('Zielübung', 'Target exercise')), targetSel),
+        newBox,
+        moveHint,
+        h('button', { class: 'btn primary', onclick: async () => {
+          const d = fromInp.value;
+          if (!d) { alert(L('Bitte ein Datum wählen.')); return; }
+          let targetId;
+          if (targetSel.value === '__new__') {
+            const nm = newName.value.trim();
+            if (!nm) { alert(L('Bitte Namen eingeben.')); return; }
+            targetId = await db.add('exercises', { name: nm, category: newCat.value, equipment: '', unit: ex.unit || 'kg' });
+          } else {
+            targetId = parseInt(targetSel.value, 10);
+          }
+          const raw = await db.byIndex('sets', 'exerciseId', id);
+          const wDate = new Map(workouts.map((w) => [w.id, w.date]));
+          let moved = 0;
+          for (const s of raw) {
+            const sd = wDate.get(s.workoutId) || (s.ts ? dayKey(s.ts) : '');
+            if (sd && sd >= d) { await db.put('sets', { ...s, exerciseId: targetId }); moved++; }
+          }
+          toast(tr(`${moved} Sätze verschoben ✓`, `${moved} sets moved ✓`));
+          location.hash = '#uebungen?id=' + targetId; route();
+        } }, tr('Verschieben', 'Move')),
+      ));
+  }
+
+  // --- Coach-Hinweis zu DIESER Übung (oben, nur wenn relevant) ---
+  if (prog.sessions >= 4) {
+    const series = prog.series;
+    const half = Math.floor(series.length / 2);
+    const earlierBest = Math.max(...series.slice(0, half).map((p) => p.value));
+    const recentBest = Math.max(...series.slice(half).map((p) => p.value));
+    let level, title, text;
+    if (recentBest > earlierBest + 0.5) {
+      level = 'good'; title = tr('Im Aufwärtstrend', 'Trending up');
+      text = tr(`Bestes 1RM von ${earlierBest} auf ${recentBest} kg gestiegen. Weiter so.`,
+        `Best 1RM rose from ${earlierBest} to ${recentBest} kg. Keep it up.`);
+    } else if (recentBest < earlierBest - 0.5) {
+      level = 'warn'; title = tr('Zuletzt schwächer', 'Recently weaker');
+      text = tr(`Bestes 1RM von ${earlierBest} auf ${recentBest} kg gefallen. Erholung/Deload prüfen.`,
+        `Best 1RM dropped from ${earlierBest} to ${recentBest} kg. Check recovery/deload.`);
+    } else {
+      level = 'tip'; title = tr('Plateau', 'Plateau');
+      text = tr(`Bestes 1RM seit ${prog.sessions} Einheiten bei ~${recentBest} kg. Deload oder Wdh.-Bereich wechseln.`,
+        `Best 1RM stuck around ${recentBest} kg for ${prog.sessions} sessions. Deload or switch rep range.`);
+    }
     wrap.appendChild(h('div', { class: 'card' },
-      h('h2', {}, tr('🔀 Sätze in andere Übung verschieben', '🔀 Move sets to another exercise')),
-      h('p', { class: 'muted small' }, tr(
-        'Verschiebt alle Sätze dieser Übung ab dem gewählten Datum in eine andere (oder neue) Übung – z.B. beim Wechsel Kurzhantel → Langhantel, damit die Progression sauber getrennt bleibt.',
-        'Moves all sets of this exercise from the chosen date on into another (or new) exercise — e.g. when switching dumbbell → barbell, to keep the progression clean.')),
-      h('label', { class: 'field' }, h('span', {}, tr('Ab Datum (inkl.)', 'From date (incl.)')), fromInp),
-      h('label', { class: 'field' }, h('span', {}, tr('Zielübung', 'Target exercise')), targetSel),
-      newBox,
-      moveHint,
-      h('button', { class: 'btn primary', onclick: async () => {
-        const d = fromInp.value;
-        if (!d) { alert(L('Bitte ein Datum wählen.')); return; }
-        let targetId;
-        if (targetSel.value === '__new__') {
-          const nm = newName.value.trim();
-          if (!nm) { alert(L('Bitte Namen eingeben.')); return; }
-          targetId = await db.add('exercises', { name: nm, category: newCat.value, equipment: '', unit: ex.unit || 'kg' });
-        } else {
-          targetId = parseInt(targetSel.value, 10);
-        }
-        const raw = await db.byIndex('sets', 'exerciseId', id);
-        const wDate = new Map(workouts.map((w) => [w.id, w.date]));
-        let moved = 0;
-        for (const s of raw) {
-          const sd = wDate.get(s.workoutId) || (s.ts ? dayKey(s.ts) : '');
-          if (sd && sd >= d) { await db.put('sets', { ...s, exerciseId: targetId }); moved++; }
-        }
-        toast(tr(`${moved} Sätze verschoben ✓`, `${moved} sets moved ✓`));
-        location.hash = '#uebungen?id=' + targetId; route();
-      } }, tr('Verschieben', 'Move')),
-    ));
+      h('div', { class: 'suggestion ' + level },
+        h('div', { class: 'sug-title' }, title),
+        h('div', { class: 'sug-text' }, text))));
   }
 
   if (prog.sessions === 0) {
-    wrap.appendChild(h('div', { class: 'card' }, h('p', { class: 'muted' }, 'Noch keine Sätze für diese Übung erfasst.')));
+    wrap.appendChild(h('div', { class: 'card' }, h('p', { class: 'muted' }, tr('Noch keine Sätze für diese Übung erfasst.', 'No sets logged for this exercise yet.'))));
+    if (editDetails) wrap.appendChild(editDetails);
     return wrap;
   }
 
+  // --- Übersicht (KPIs + Charts) ---
   wrap.appendChild(h('div', { class: 'kpi-grid' },
-    kpi(prog.current + ' kg', 'Aktuelles 1RM'),
-    kpi(prog.best + ' kg', 'Bestes 1RM'),
-    kpi((prog.changePct >= 0 ? '+' : '') + prog.changePct + '%', 'seit Start'),
-    kpi((prog.slopePerWeek >= 0 ? '+' : '') + prog.slopePerWeek, 'kg/Woche'),
+    kpi(prog.current + ' kg', tr('Aktuelles 1RM', 'Current 1RM')),
+    kpi(prog.best + ' kg', tr('Bestes 1RM', 'Best 1RM')),
+    kpi((prog.changePct >= 0 ? '+' : '') + prog.changePct + '%', tr('seit Start', 'since start')),
+    kpi((prog.slopePerWeek >= 0 ? '+' : '') + prog.slopePerWeek, tr('kg/Woche', 'kg/week')),
   ));
 
   wrap.appendChild(h('div', { class: 'card' },
@@ -1125,6 +1158,10 @@ async function renderExerciseDetail(id) {
     hist.appendChild(group);
   }
   wrap.appendChild(hist);
+
+  // Bearbeiten + Bulk-Op ganz unten, eingeklappt.
+  if (editDetails) wrap.appendChild(editDetails);
+  if (bulkDetails) wrap.appendChild(bulkDetails);
   return wrap;
 }
 
