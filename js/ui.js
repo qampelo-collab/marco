@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v33';
+const APP_VERSION = 'v34';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -956,7 +956,7 @@ async function renderExercises() {
 
 async function renderExerciseDetail(id) {
   const ex = await db.get('exercises', id);
-  const { enriched } = await loadEnrichedSets();
+  const { enriched, exercises, workouts } = await loadEnrichedSets();
   const sets = enriched.filter((s) => s.exerciseId === id);
   const prog = progression(sets, FORMULA);
 
@@ -999,6 +999,67 @@ async function renderExerciseDetail(id) {
         await db.delete('exercises', id);
         location.hash = '#uebungen'; route();
       } }, tr('🗑 Übung löschen', '🗑 Delete exercise')),
+    ));
+  }
+
+  // 🔀 Sätze ab einem Datum in eine andere/neue Übung verschieben
+  // (z.B. Wechsel Kurzhantel → Langhantel sauber trennen).
+  if (ex && sets.length) {
+    const latestDate = sets.map((s) => s.date).filter(Boolean).sort().pop() || todayStr();
+    const fromInp = h('input', { type: 'date', class: 'inp', value: latestDate });
+    const others = exercises.filter((e) => e.id !== id).sort((a, b) => a.name.localeCompare(b.name));
+    const targetSel = h('select', { class: 'inp' },
+      h('option', { value: '__new__' }, tr('➕ Neue Übung anlegen …', '➕ Create new exercise …')),
+      ...others.map((e) => h('option', { value: e.id }, `${e.name} (${CAT_LABEL[e.category] || e.category})`)));
+    const newName = h('input', { class: 'inp', value: `${ex.name} (Langhantel)` });
+    const newCat = h('select', { class: 'inp' }, ...Object.entries(CAT_LABEL).map(([v, l]) => h('option', { value: v }, l)));
+    newCat.value = ex.category;
+    const newBox = h('div', {},
+      h('div', { class: 'field-row' },
+        h('label', { class: 'field' }, h('span', {}, tr('Name der neuen Übung', 'New exercise name')), newName),
+        h('label', { class: 'field' }, h('span', {}, tr('Kategorie', 'Category')), newCat),
+      ));
+    const syncNewBox = () => { newBox.style.display = targetSel.value === '__new__' ? '' : 'none'; };
+    targetSel.addEventListener('change', syncNewBox); syncNewBox();
+
+    const moveHint = h('div', { class: 'hint' }, '');
+    const updateMoveHint = () => {
+      const d = fromInp.value || '0000';
+      const n = sets.filter((s) => (s.date || '') >= d).length;
+      moveHint.textContent = tr(`${n} Sätze ab ${fmtDate(d)} werden verschoben.`, `${n} sets from ${fmtDate(d)} on will be moved.`);
+    };
+    fromInp.addEventListener('change', updateMoveHint); updateMoveHint();
+
+    wrap.appendChild(h('div', { class: 'card' },
+      h('h2', {}, tr('🔀 Sätze in andere Übung verschieben', '🔀 Move sets to another exercise')),
+      h('p', { class: 'muted small' }, tr(
+        'Verschiebt alle Sätze dieser Übung ab dem gewählten Datum in eine andere (oder neue) Übung – z.B. beim Wechsel Kurzhantel → Langhantel, damit die Progression sauber getrennt bleibt.',
+        'Moves all sets of this exercise from the chosen date on into another (or new) exercise — e.g. when switching dumbbell → barbell, to keep the progression clean.')),
+      h('label', { class: 'field' }, h('span', {}, tr('Ab Datum (inkl.)', 'From date (incl.)')), fromInp),
+      h('label', { class: 'field' }, h('span', {}, tr('Zielübung', 'Target exercise')), targetSel),
+      newBox,
+      moveHint,
+      h('button', { class: 'btn primary', onclick: async () => {
+        const d = fromInp.value;
+        if (!d) { alert(L('Bitte ein Datum wählen.')); return; }
+        let targetId;
+        if (targetSel.value === '__new__') {
+          const nm = newName.value.trim();
+          if (!nm) { alert(L('Bitte Namen eingeben.')); return; }
+          targetId = await db.add('exercises', { name: nm, category: newCat.value, equipment: '', unit: ex.unit || 'kg' });
+        } else {
+          targetId = parseInt(targetSel.value, 10);
+        }
+        const raw = await db.byIndex('sets', 'exerciseId', id);
+        const wDate = new Map(workouts.map((w) => [w.id, w.date]));
+        let moved = 0;
+        for (const s of raw) {
+          const sd = wDate.get(s.workoutId) || (s.ts ? dayKey(s.ts) : '');
+          if (sd && sd >= d) { await db.put('sets', { ...s, exerciseId: targetId }); moved++; }
+        }
+        toast(tr(`${moved} Sätze verschoben ✓`, `${moved} sets moved ✓`));
+        location.hash = '#uebungen?id=' + targetId; route();
+      } }, tr('Verschieben', 'Move')),
     ));
   }
 
