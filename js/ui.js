@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v26';
+const APP_VERSION = 'v27';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -1349,18 +1349,55 @@ async function renderBody() {
 
   const list = h('div', { class: 'card' }, h('h2', {}, 'Einträge'));
   if (!rows.length) list.appendChild(h('p', { class: 'muted' }, 'Noch keine Einträge.'));
-  for (const r of rows.slice(0, 40)) {
-    const parts = [r.weight ? r.weight + ' kg' : null, r.bodyfat ? 'KFA ' + r.bodyfat + '%' : null,
-      r.shoulder ? 'Schulter ' + r.shoulder : null, r.chest ? 'Brust ' + r.chest : null,
-      r.waist ? 'Taille ' + r.waist : null, r.neck ? 'Nacken ' + r.neck : null,
-      r.arm ? 'Arm ' + r.arm : null, r.thigh ? 'OSchenkel ' + r.thigh : null].filter(Boolean);
-    list.appendChild(h('div', { class: 'set-item' },
-      h('div', { class: 'set-main' }, h('strong', {}, fmtDate(r.date)), h('div', { class: 'muted small' }, parts.join(' · '))),
-      h('button', { class: 'btn ghost small danger', onclick: async () => { await db.delete('body', r.id); route(); } }, '✕'),
-    ));
-  }
+  for (const r of rows.slice(0, 60)) list.appendChild(makeBodyRow(r));
   wrap.appendChild(list);
   return wrap;
+
+  // Körper-Eintrag mit Anzeige- und Bearbeiten-Modus.
+  function makeBodyRow(r) {
+    const row = h('div', { class: 'set-item' });
+    const showView = () => {
+      clear(row);
+      const parts = [r.weight ? r.weight + ' kg' : null, r.bodyfat ? 'KFA ' + r.bodyfat + '%' : null,
+        r.shoulder ? 'Schulter ' + r.shoulder : null, r.chest ? 'Brust ' + r.chest : null,
+        r.waist ? 'Taille ' + r.waist : null, r.neck ? 'Nacken ' + r.neck : null,
+        r.arm ? 'Arm ' + r.arm : null, r.thigh ? 'OSchenkel ' + r.thigh : null].filter(Boolean);
+      row.appendChild(h('div', { class: 'set-main' },
+        h('strong', {}, `${weekdayShort(r.date)}, ${fmtDate(r.date)}`),
+        h('div', { class: 'muted small' }, parts.length ? parts.join(' · ') : tr('keine Werte', 'no values'))));
+      row.appendChild(h('button', { class: 'btn ghost small', onclick: showEdit, title: tr('Bearbeiten', 'Edit') }, '✎'));
+      row.appendChild(h('button', { class: 'btn ghost small danger', onclick: async () => { await db.delete('body', r.id); route(); } }, '✕'));
+    };
+    const showEdit = () => {
+      clear(row);
+      const mk = (val) => h('input', { type: 'number', step: '0.1', inputmode: 'decimal', class: 'inp', value: val ?? '' });
+      const dE = h('input', { type: 'date', class: 'inp', value: r.date || todayStr() });
+      const wE = mk(r.weight), bfE = mk(r.bodyfat), shE = mk(r.shoulder), chE = mk(r.chest);
+      const waE = mk(r.waist), neE = mk(r.neck), arE = mk(r.arm), thE = mk(r.thigh);
+      const fr = (a, la, b, lb) => h('div', { class: 'field-row' },
+        h('label', { class: 'field' }, h('span', {}, la), a),
+        h('label', { class: 'field' }, h('span', {}, lb), b));
+      row.appendChild(h('div', { class: 'set-main', style: 'width:100%' },
+        h('label', { class: 'field' }, h('span', {}, tr('Datum', 'Date')), dE),
+        fr(wE, tr('Gewicht (kg)', 'Weight (kg)'), bfE, tr('Körperfett %', 'Body fat %')),
+        fr(shE, 'Schulter', chE, 'Brust'),
+        fr(waE, 'Taille', neE, 'Nacken'),
+        fr(arE, 'Arm', thE, 'Oberschenkel'),
+        h('div', { class: 'seg', style: 'margin-top:4px' },
+          h('button', { class: 'btn primary small', onclick: async () => {
+            await db.put('body', { ...r, date: dE.value || r.date,
+              weight: num(wE.value), bodyfat: num(bfE.value), shoulder: num(shE.value), chest: num(chE.value),
+              waist: num(waE.value), neck: num(neE.value), arm: num(arE.value), thigh: num(thE.value) });
+            toast(tr('Gespeichert ✓', 'Saved ✓'));
+            route();
+          } }, tr('✓ Speichern', '✓ Save')),
+          h('button', { class: 'btn ghost small', onclick: showView }, tr('Abbrechen', 'Cancel')),
+        ),
+      ));
+    };
+    showView();
+    return row;
+  }
 }
 
 // ==================================================================
