@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v28';
+const APP_VERSION = 'v29';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -469,13 +469,22 @@ async function renderTraining() {
     return sec;
   }
 
+  const dateEdit = h('input', { type: 'date', class: 'inp', value: current.date || todayStr() });
+  dateEdit.addEventListener('change', async () => {
+    const v = dateEdit.value;
+    if (!v) { dateEdit.value = current.date; return; }
+    current.date = v;
+    await db.put('workouts', current);
+    toast(tr('Datum geändert ✓', 'Date changed ✓'));
+  });
   const header = h('div', { class: 'card' },
     h('div', { class: 'chart-head' },
-      h('h2', {}, 'Einheit vom ' + fmtDate(current.date)),
+      h('h2', {}, tr('Einheit bearbeiten', 'Edit session')),
       h('button', { class: 'btn ghost small', onclick: async () => {
         await db.setMeta('currentWorkout', null); route();
-      } }, 'Fertig / schließen'),
+      } }, tr('Fertig / schließen', 'Done / close')),
     ),
+    h('label', { class: 'field' }, h('span', {}, tr('📅 Datum der Einheit', '📅 Session date')), dateEdit),
     h('button', { class: 'btn ghost small danger', onclick: async () => {
       const q = getLang() === 'en'
         ? `Permanently delete this session incl. all ${sets.length} sets?`
