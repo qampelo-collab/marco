@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v41';
+const APP_VERSION = 'v42';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -1812,10 +1812,15 @@ async function renderSettings() {
   // Backup
   wrap.appendChild(h('div', { class: 'card' },
     h('h2', {}, 'Backup'),
-    h('p', { class: 'muted small' }, 'Alle Daten liegen lokal auf diesem Gerät. Sichere sie regelmäßig als Datei.'),
+    h('p', { class: 'muted small' }, tr(
+      'Alle Daten liegen lokal auf diesem Gerät. Sichere sie regelmäßig als Datei.',
+      'All data is stored locally on this device. Back it up regularly as a file.')),
+    h('p', { class: 'muted small' }, tr(
+      'Wichtig (iPhone): Die App im Safari und die zum Home-Bildschirm hinzugefügte App haben getrennte Speicher. Zum Übertragen: im Safari exportieren, in der Home-App importieren.',
+      'Note (iPhone): the app in Safari and the one added to the home screen use separate storage. To transfer: export in Safari, import in the home-screen app.')),
     h('button', { class: 'btn primary', onclick: exportBackup }, '⬇ Backup exportieren (JSON)'),
     h('label', { class: 'btn ghost file-btn' }, '⬆ Backup importieren',
-      h('input', { type: 'file', accept: 'application/json', style: 'display:none', onchange: importBackup })),
+      h('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onchange: importBackup })),
   ));
 
   // Gefahrenzone
@@ -1863,9 +1868,23 @@ async function forceUpdate() {
 
 async function exportBackup() {
   const dump = await exportAll();
-  const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+  const json = JSON.stringify(dump, null, 2);
+  const fname = `kraft-tracker-backup-${todayStr()}.json`;
+  // iPhone/Mobile: über den Teilen-Dialog als Datei sichern (zuverlässiger
+  // als ein versteckter Download – „In Dateien sichern", AirDrop, …).
+  try {
+    const file = new File([json], fname, { type: 'application/json' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Kraft-Tracker Backup' });
+      return;
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') return; // Nutzer hat abgebrochen
+    // sonst: Fallback unten
+  }
+  const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  const a = h('a', { href: url, download: `kraft-tracker-backup-${todayStr()}.json` });
+  const a = h('a', { href: url, download: fname });
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
 }
