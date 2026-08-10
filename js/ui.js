@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v32';
+const APP_VERSION = 'v33';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -376,7 +376,6 @@ async function renderTraining() {
     });
 
     const takeBtn = h('label', { class: 'btn primary big-pause' }, qPhotoInp, tr('📷 Trainingsnotiz fotografieren', '📷 Photograph your notes'));
-    const reBtn = h('button', { class: 'btn ghost small', onclick: runExtraction }, tr('🔄 Erneut lesen', '🔄 Read again'));
 
     wrap.appendChild(h('div', { class: 'card' },
       h('h2', {}, tr('📷 Training aus Foto', '📷 Training from photo')),
@@ -388,7 +387,6 @@ async function renderTraining() {
       qHint,
       qAll,
       qDateBox,
-      reBtn,
     ));
 
     // ============ AUSNAHME: manuell erfassen (eingeklappt) ============
