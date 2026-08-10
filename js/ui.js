@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v27';
+const APP_VERSION = 'v28';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -766,18 +766,69 @@ async function renderHistory() {
     if (s.category) a.cats.add(s.category);
   }
 
-  const sorted = [...workouts].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.id - a.id));
+  const allSorted = [...workouts].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.id - a.id));
 
-  // Kopf-KPIs: Gesamtzahl + Einheiten in diesem Monat.
+  // ---- Filter (nach Trainingsname und Kategorie), Zustand in der URL ----
+  const params = new URLSearchParams(location.hash.split('?')[1] || '');
+  const nameFilter = params.get('name') || '';
+  const catFilter = params.get('cat') || '';
+
+  const names = [...new Set(workouts.map((w) => w.templateName).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const cats = [...new Set([...agg.values()].flatMap((a) => [...a.cats]))];
+
+  const setFilter = (name, cat) => {
+    const p = new URLSearchParams();
+    if (name) p.set('name', name);
+    if (cat) p.set('cat', cat);
+    const qs = p.toString();
+    location.hash = '#einheiten' + (qs ? '?' + qs : '');
+  };
+  const nameSel = h('select', { class: 'inp' },
+    h('option', { value: '' }, tr('Alle Trainings', 'All sessions')),
+    ...names.map((n) => h('option', { value: n }, n)));
+  nameSel.value = nameFilter;
+  const catSel = h('select', { class: 'inp' },
+    h('option', { value: '' }, tr('Alle Kategorien', 'All categories')),
+    ...cats.map((c) => h('option', { value: c }, CAT_LABEL[c] || c)));
+  catSel.value = catFilter;
+  nameSel.addEventListener('change', () => setFilter(nameSel.value, catSel.value));
+  catSel.addEventListener('change', () => setFilter(nameSel.value, catSel.value));
+
+  if (names.length || cats.length) {
+    wrap.appendChild(h('div', { class: 'card' },
+      h('div', { class: 'field-row' },
+        h('label', { class: 'field' }, h('span', {}, tr('Training', 'Session')), nameSel),
+        h('label', { class: 'field' }, h('span', {}, tr('Kategorie', 'Category')), catSel),
+      ),
+      (nameFilter || catFilter)
+        ? h('button', { class: 'btn ghost small', onclick: () => setFilter('', '') }, tr('Filter zurücksetzen', 'Clear filters'))
+        : h('div', { class: 'muted small' }, tr('Nach Trainingsname oder Kategorie filtern.', 'Filter by session name or category.')),
+    ));
+  }
+
+  // Filter anwenden.
+  const sorted = allSorted.filter((w) => {
+    if (nameFilter && w.templateName !== nameFilter) return false;
+    if (catFilter && !(agg.get(w.id)?.cats.has(catFilter))) return false;
+    return true;
+  });
+
+  // Kopf-KPIs (auf die gefilterte Auswahl bezogen).
   const thisYM = todayStr().slice(0, 7);
   const inMonth = sorted.filter((w) => (w.date || '').slice(0, 7) === thisYM).length;
-  const totalVol = [...agg.values()].reduce((sum, a) => sum + a.volume, 0);
+  const selVol = sorted.reduce((sum, w) => sum + (agg.get(w.id)?.volume || 0), 0);
+  const selSets = sorted.reduce((sum, w) => sum + (agg.get(w.id)?.sets || 0), 0);
   wrap.appendChild(h('div', { class: 'kpi-grid' },
-    kpi(String(workouts.length), tr('Einheiten gesamt', 'Total sessions')),
+    kpi(String(sorted.length), (nameFilter || catFilter) ? tr('Einheiten (gefiltert)', 'Sessions (filtered)') : tr('Einheiten gesamt', 'Total sessions')),
     kpi(String(inMonth), tr('diesen Monat', 'this month')),
-    kpi(Math.round(totalVol).toLocaleString('de-DE') + ' kg', tr('Volumen gesamt', 'Total volume')),
-    kpi(String(agg.size ? Math.round([...agg.values()].reduce((s, a) => s + a.sets, 0) / workouts.length) : 0), tr('Ø Sätze/Einheit', 'Avg sets/session')),
+    kpi(Math.round(selVol).toLocaleString('de-DE') + ' kg', tr('Volumen', 'Volume')),
+    kpi(String(sorted.length ? Math.round(selSets / sorted.length) : 0), tr('Ø Sätze/Einheit', 'Avg sets/session')),
   ));
+
+  if (!sorted.length) {
+    wrap.appendChild(h('div', { class: 'card' }, h('p', { class: 'muted' }, tr('Keine Einheiten für diesen Filter.', 'No sessions for this filter.'))));
+    return wrap;
+  }
 
   // Nach Monat gruppieren (Reihenfolge: neueste zuerst).
   let curYM = null;
