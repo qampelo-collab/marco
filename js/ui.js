@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v29';
+const APP_VERSION = 'v30';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -777,50 +777,40 @@ async function renderHistory() {
 
   const allSorted = [...workouts].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.id - a.id));
 
-  // ---- Filter (nach Trainingsname und Kategorie), Zustand in der URL ----
+  // ---- Filter nach Trainingsname (ohne Groß-/Kleinschreibung) ----
   const params = new URLSearchParams(location.hash.split('?')[1] || '');
-  const nameFilter = params.get('name') || '';
-  const catFilter = params.get('cat') || '';
+  const nameFilter = (params.get('name') || '').toLowerCase();
 
-  const names = [...new Set(workouts.map((w) => w.templateName).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  const cats = [...new Set([...agg.values()].flatMap((a) => [...a.cats]))];
+  // Namen fallunabhängig zusammenfassen: erste Schreibweise als Anzeige.
+  const nameByKey = new Map();
+  for (const w of workouts) {
+    if (!w.templateName) continue;
+    const k = w.templateName.toLowerCase();
+    if (!nameByKey.has(k)) nameByKey.set(k, w.templateName);
+  }
+  const names = [...nameByKey.entries()].sort((a, b) => a[1].localeCompare(b[1]));
 
-  const setFilter = (name, cat) => {
-    const p = new URLSearchParams();
-    if (name) p.set('name', name);
-    if (cat) p.set('cat', cat);
-    const qs = p.toString();
-    location.hash = '#einheiten' + (qs ? '?' + qs : '');
+  const setFilter = (nameKey) => {
+    location.hash = '#einheiten' + (nameKey ? '?name=' + encodeURIComponent(nameKey) : '');
   };
   const nameSel = h('select', { class: 'inp' },
     h('option', { value: '' }, tr('Alle Trainings', 'All sessions')),
-    ...names.map((n) => h('option', { value: n }, n)));
+    ...names.map(([key, label]) => h('option', { value: key }, label)));
   nameSel.value = nameFilter;
-  const catSel = h('select', { class: 'inp' },
-    h('option', { value: '' }, tr('Alle Kategorien', 'All categories')),
-    ...cats.map((c) => h('option', { value: c }, CAT_LABEL[c] || c)));
-  catSel.value = catFilter;
-  nameSel.addEventListener('change', () => setFilter(nameSel.value, catSel.value));
-  catSel.addEventListener('change', () => setFilter(nameSel.value, catSel.value));
+  nameSel.addEventListener('change', () => setFilter(nameSel.value));
 
-  if (names.length || cats.length) {
+  if (names.length) {
     wrap.appendChild(h('div', { class: 'card' },
-      h('div', { class: 'field-row' },
-        h('label', { class: 'field' }, h('span', {}, tr('Training', 'Session')), nameSel),
-        h('label', { class: 'field' }, h('span', {}, tr('Kategorie', 'Category')), catSel),
-      ),
-      (nameFilter || catFilter)
-        ? h('button', { class: 'btn ghost small', onclick: () => setFilter('', '') }, tr('Filter zurücksetzen', 'Clear filters'))
-        : h('div', { class: 'muted small' }, tr('Nach Trainingsname oder Kategorie filtern.', 'Filter by session name or category.')),
+      h('label', { class: 'field' }, h('span', {}, tr('Training', 'Session')), nameSel),
+      nameFilter
+        ? h('button', { class: 'btn ghost small', onclick: () => setFilter('') }, tr('Filter zurücksetzen', 'Clear filter'))
+        : h('div', { class: 'muted small' }, tr('Nach Trainingsname filtern.', 'Filter by session name.')),
     ));
   }
 
-  // Filter anwenden.
-  const sorted = allSorted.filter((w) => {
-    if (nameFilter && w.templateName !== nameFilter) return false;
-    if (catFilter && !(agg.get(w.id)?.cats.has(catFilter))) return false;
-    return true;
-  });
+  // Filter anwenden (fallunabhängig).
+  const sorted = allSorted.filter((w) =>
+    !nameFilter || (w.templateName || '').toLowerCase() === nameFilter);
 
   // Kopf-KPIs (auf die gefilterte Auswahl bezogen).
   const thisYM = todayStr().slice(0, 7);
@@ -828,7 +818,7 @@ async function renderHistory() {
   const selVol = sorted.reduce((sum, w) => sum + (agg.get(w.id)?.volume || 0), 0);
   const selSets = sorted.reduce((sum, w) => sum + (agg.get(w.id)?.sets || 0), 0);
   wrap.appendChild(h('div', { class: 'kpi-grid' },
-    kpi(String(sorted.length), (nameFilter || catFilter) ? tr('Einheiten (gefiltert)', 'Sessions (filtered)') : tr('Einheiten gesamt', 'Total sessions')),
+    kpi(String(sorted.length), nameFilter ? tr('Einheiten (gefiltert)', 'Sessions (filtered)') : tr('Einheiten gesamt', 'Total sessions')),
     kpi(String(inMonth), tr('diesen Monat', 'this month')),
     kpi(Math.round(selVol).toLocaleString('de-DE') + ' kg', tr('Volumen', 'Volume')),
     kpi(String(sorted.length ? Math.round(selSets / sorted.length) : 0), tr('Ø Sätze/Einheit', 'Avg sets/session')),

@@ -1,5 +1,5 @@
 // sw.js — Service Worker: App offline verfügbar machen.
-const CACHE = 'kraft-tracker-v29';
+const CACHE = 'kraft-tracker-v30';
 const ASSETS = [
   './',
   './index.html',
