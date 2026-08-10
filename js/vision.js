@@ -20,35 +20,36 @@ export const DEFAULT_VISION_MODEL = 'claude-opus-5';
 // Prompt: klare Anweisung, ausschließlich JSON zurückzugeben.
 function buildPrompt(exerciseNames) {
   const known = (exerciseNames || []).filter(Boolean);
-  const jsonShape = `{"sets":[{"exercise": string|null, "weight": number|null, "reps": integer|null, "unit":"kg"|"lb"|"s"}], "note": string|null}`;
+  const jsonShape = `{"date": "YYYY-MM-DD"|null, "name": string|null, "sets":[{"exercise": string|null, "weight": number|null, "reps": integer|null, "unit":"kg"|"lb"|"s"}], "note": string|null}`;
   if (en()) {
     const knownBlock = known.length
-      ? `\nKnown exercise names (map the exercise to one of these if possible, otherwise guess the name or use null): ${known.join(', ')}.`
+      ? `\nKnown exercise names (map each exercise to one of these if possible, otherwise use the written name): ${known.join(', ')}.`
       : '';
     return (
-      `You read strength-training data from a photo. The photo shows either a machine display, ` +
-      `a handwritten training log, or a whiteboard. Recognize all sets with weight and reps.` +
+      `You read strength-training data from a photo. It is usually a handwritten training-log sheet with this layout:\n` +
+      `- Header: "DATUM" (date, format DD.MM.YYYY), "TRAININGSNAME" (session name), a weekday checkbox row, "ANFANG"/"ENDE" (start/end time).\n` +
+      `- Column "ÜBUNGEN": the exercises. Right next to each name there may be a target annotation (rest seconds and/or a rep range, e.g. "90-120" or "6-10|~12"). IGNORE these — they are targets, not performed values.\n` +
+      `- Columns "SATZ 1" … "SATZ 6": the performed sets. Each FILLED cell holds two stacked numbers: the TOP number is the weight in kg, the BOTTOM number is the reps. Read every filled cell, left to right, as one set for that exercise. If a cell has only one number, treat it as reps (weight null).\n` +
+      `Read "DATUM" into "date" (convert to YYYY-MM-DD) and "TRAININGSNAME" into "name". If instead the photo is a machine display or a simple note, just read the visible sets.` +
       knownBlock +
-      `\n\nRespond ONLY with a JSON object in exactly this shape, no markdown, no code fence, no explanation:\n` +
+      `\n\nRespond ONLY with a JSON object in exactly this shape — no markdown, no code fence, no explanation:\n` +
       `${jsonShape}\n\n` +
-      `Rules: weight in the unit shown (default kg). If a value is not clearly readable, use null. ` +
-      `"note" for short hints (e.g. uncertainties), otherwise null. Return only real sets visible in the image — do not invent values.`
+      `If a value is not clearly readable, use null. Return only real values visible in the image — do not invent anything.`
     );
   }
   const knownBlock = known.length
-    ? `\nBekannte Übungsnamen (ordne die Übung wenn möglich einem davon zu, sonst rate den Namen oder gib null): ${known.join(', ')}.`
+    ? `\nBekannte Übungsnamen (ordne jede Übung wenn möglich einem davon zu, sonst nimm den geschriebenen Namen): ${known.join(', ')}.`
     : '';
   return (
-    `Du liest Krafttrainings-Daten aus einem Foto aus. Das Foto zeigt entweder das Display ` +
-    `eines Trainingsgeräts, ein handschriftliches Trainingslog oder ein Whiteboard. ` +
-    `Erkenne alle Sätze mit Gewicht und Wiederholungen.` +
+    `Du liest Krafttrainings-Daten aus einem Foto aus. Es ist meist ein handschriftliches Trainingslog mit diesem Aufbau:\n` +
+    `- Kopf: "DATUM" (Datum, Format TT.MM.JJJJ), "TRAININGSNAME", eine Wochentag-Kästchenreihe, "ANFANG"/"ENDE" (Start-/Endzeit).\n` +
+    `- Spalte "ÜBUNGEN": die Übungen. Direkt neben dem Namen stehen evtl. Zielangaben (Pausensekunden und/oder Wdh.-Bereich, z.B. "90-120" oder "6-10|~12"). IGNORIERE diese — das sind Ziele, keine geleisteten Werte.\n` +
+    `- Spalten "SATZ 1" … "SATZ 6": die geleisteten Sätze. Jede AUSGEFÜLLTE Zelle enthält zwei übereinander stehende Zahlen: die OBERE ist das Gewicht in kg, die UNTERE sind die Wiederholungen. Lies jede ausgefüllte Zelle von links nach rechts als einen Satz dieser Übung. Steht nur eine Zahl, werte sie als Wiederholungen (Gewicht null).\n` +
+    `Lies "DATUM" in "date" (umgewandelt nach YYYY-MM-DD) und "TRAININGSNAME" in "name". Falls das Foto stattdessen ein Geräte-Display oder eine einfache Notiz ist, lies einfach die sichtbaren Sätze.` +
     knownBlock +
-    `\n\nAntworte AUSSCHLIESSLICH mit einem JSON-Objekt in genau dieser Form, ohne Markdown, ` +
-    `ohne Code-Zaun, ohne erklärenden Text:\n` +
+    `\n\nAntworte AUSSCHLIESSLICH mit einem JSON-Objekt in genau dieser Form – ohne Markdown, ohne Code-Zaun, ohne Erklärtext:\n` +
     `${jsonShape}\n\n` +
-    `Regeln: Gewicht in der abgebildeten Einheit (Standard kg). Wenn ein Wert nicht sicher lesbar ist, ` +
-    `verwende null. "note" für kurze Hinweise (z.B. Unsicherheiten), sonst null. Gib nur reale, im Bild ` +
-    `erkennbare Sätze zurück – erfinde keine Werte.`
+    `Wenn ein Wert nicht sicher lesbar ist, verwende null. Gib nur reale, im Bild erkennbare Werte zurück – erfinde nichts.`
   );
 }
 
@@ -114,7 +115,23 @@ export function parseResponse(apiJson) {
     }))
     .filter((s) => s.weight != null || s.reps != null);
 
-  return { sets, note: data.note != null ? String(data.note) : null };
+  return {
+    sets,
+    note: data.note != null ? String(data.note) : null,
+    date: normalizeDate(data.date),
+    name: data.name != null ? String(data.name).trim() : null,
+  };
+}
+
+// Datum in YYYY-MM-DD normalisieren (akzeptiert TT.MM.JJJJ und YYYY-MM-DD).
+function normalizeDate(d) {
+  if (!d) return null;
+  const s = String(d).trim();
+  let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (m) return s;
+  m = /^(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})$/.exec(s);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return null;
 }
 
 function numOrNull(v) { const n = parseFloat(v); return isNaN(n) ? null : n; }

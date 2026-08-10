@@ -277,7 +277,10 @@ async function renderTraining() {
     const qPhotoInp = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'inp-file' });
     const qPreview = h('div', { class: 'photo-preview' });
     const qHint = h('div', { class: 'hint' }, '');
+    const qAll = h('div', { class: 'quick-all' });
     let qPhoto = null;
+    let qRecognized = [];
+    let qRecName = null;
     const qMatch = (name) => {
       if (!name) return null;
       const low = name.toLowerCase();
@@ -285,6 +288,22 @@ async function renderTraining() {
         || exercises.find((e) => e.name.toLowerCase().includes(low) || low.includes(e.name.toLowerCase()));
       return ex ? ex.id : null;
     };
+    // Ganze erkannte Einheit auf einmal speichern (fehlende Übungen werden angelegt).
+    async function saveWholeSession() {
+      if (!qRecognized.length) return;
+      const date = qDate.value || todayStr();
+      const wid = await db.add('workouts', { date, notes: qRecName || '', templateName: qRecName || undefined });
+      let first = true, n = 0;
+      for (const s of qRecognized) {
+        let exId = qMatch(s.exercise);
+        if (!exId && s.exercise) exId = await db.add('exercises', { name: s.exercise, category: 'sonstige', equipment: '', unit: 'kg' });
+        if (!exId) continue;
+        await db.add('sets', { workoutId: wid, exerciseId: exId, weight: s.weight || 0, reps: s.reps || 0, rpe: null, photo: first ? qPhoto : null, ts: Date.now() });
+        first = false; n++;
+      }
+      toast(tr(`Gespeichert ✓ (${n} Sätze)`, `Saved ✓ (${n} sets)`));
+      route();
+    }
     qPhotoInp.addEventListener('change', async () => {
       const file = qPhotoInp.files[0];
       if (!file) { qPhoto = null; clear(qPreview); return; }
@@ -298,13 +317,23 @@ async function renderTraining() {
       if (!qPhoto) { qHint.textContent = tr('Bitte zuerst ein Foto aufnehmen/auswählen.', 'Please take/select a photo first.'); return; }
       const o = qAiBtn.textContent; qAiBtn.textContent = tr('🤖 Lese Foto …', '🤖 Reading photo …'); qAiBtn.disabled = true; qHint.textContent = '';
       try {
-        const { sets, note } = await extractSetsFromImage({ dataUrl: qPhoto, apiKey, model: visionModel, exerciseNames: exercises.map((e) => e.name) });
-        if (sets.length) {
-          const s = sets[0];
+        const res = await extractSetsFromImage({ dataUrl: qPhoto, apiKey, model: visionModel, exerciseNames: exercises.map((e) => e.name) });
+        qRecognized = res.sets || []; qRecName = res.name || null;
+        if (res.date) qDate.value = res.date;
+        clear(qAll);
+        if (qRecognized.length) {
+          const s = qRecognized[0];
           if (s.weight != null) qWeight.value = s.weight;
           if (s.reps != null) qReps.value = s.reps;
           const id = qMatch(s.exercise); if (id) qEx.value = id;
-          qHint.textContent = tr('Erkannt: ', 'Recognized: ') + `${s.exercise || '?'} · ${s.weight ?? '?'} kg × ${s.reps ?? '?'}` + (note ? ' · ' + note : '');
+          qHint.textContent = (res.name ? res.name + ' · ' : '') +
+            tr(`${qRecognized.length} Sätze erkannt`, `${qRecognized.length} sets recognized`) +
+            (res.date ? ' · ' + fmtDate(res.date) : '') + (res.note ? ' · ' + res.note : '');
+          const list = h('div', { class: 'muted small', style: 'margin:6px 0' });
+          for (const x of qRecognized) list.appendChild(h('div', {}, `• ${x.exercise || '?'} — ${x.weight ?? '?'} kg × ${x.reps ?? '?'}`));
+          qAll.appendChild(list);
+          qAll.appendChild(h('button', { class: 'btn primary', onclick: saveWholeSession },
+            tr(`✅ Ganzes Training speichern (${qRecognized.length} Sätze)`, `✅ Save whole session (${qRecognized.length} sets)`)));
         } else { qHint.textContent = tr('Keine Werte erkannt.', 'No values recognized.'); }
       } catch (err) { qHint.textContent = '⚠️ ' + err.message; }
       finally { qAiBtn.textContent = o; qAiBtn.disabled = false; }
@@ -324,6 +353,8 @@ async function renderTraining() {
       qPreview,
       qAiBtn,
       qHint,
+      qAll,
+      h('div', { class: 'muted small', style: 'margin:8px 0 2px' }, tr('… oder einzelnen Satz:', '… or a single set:')),
       h('button', { class: 'btn primary', onclick: async () => {
         const w = parseFloat(qWeight.value), r = parseInt(qReps.value, 10);
         if (!(w > 0) || !(r > 0)) { alert(tr('Bitte Gewicht und Wiederholungen eingeben.', 'Please enter weight and reps.')); return; }
