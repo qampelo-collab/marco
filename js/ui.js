@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v25';
+const APP_VERSION = 'v26';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -40,6 +40,23 @@ function h(tag, attrs = {}, ...children) {
 function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 function fmtDate(s) { return s ? s.slice(8, 10) + '.' + s.slice(5, 7) + '.' + s.slice(0, 4) : ''; }
+
+const MONTHS_DE = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+const MONTHS_EN = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const WEEKDAYS_DE = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+const WEEKDAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// Monatsüberschrift aus "YYYY-MM" (z.B. "August 2026").
+function monthLabel(ym) {
+  const [y, m] = ym.split('-');
+  const names = getLang() === 'en' ? MONTHS_EN : MONTHS_DE;
+  return `${names[parseInt(m, 10) - 1]} ${y}`;
+}
+// Wochentag-Kürzel aus "YYYY-MM-DD".
+function weekdayShort(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  if (isNaN(d)) return '';
+  return (getLang() === 'en' ? WEEKDAYS_EN : WEEKDAYS_DE)[d.getDay()];
+}
 
 // ---------- Daten anreichern ----------
 async function loadEnrichedSets() {
@@ -69,6 +86,7 @@ const routes = {
   '': renderDashboard,
   '#dashboard': renderDashboard,
   '#training': renderTraining,
+  '#einheiten': renderHistory,
   '#uebungen': renderExercises,
   '#plaene': renderPlans,
   '#fortschritt': renderProgress,
@@ -407,29 +425,28 @@ async function renderTraining() {
       ),
     ));
 
-    // Vergangene Einheiten
+    // Letzte Einheiten (Kurzvorschau) + Link zum ganzen Verlauf
     if (workouts.length) {
-      const list = h('div', { class: 'card' }, h('h2', {}, 'Bisherige Einheiten'));
-      for (const w of workouts.slice(0, 20)) {
-        const sets = await db.byIndex('sets', 'workoutId', w.id);
+      const setsByW = new Map();
+      for (const s of enriched) setsByW.set(s.workoutId, (setsByW.get(s.workoutId) || 0) + 1);
+      const list = h('div', { class: 'card' },
+        h('div', { class: 'chart-head' },
+          h('h2', {}, tr('Letzte Einheiten', 'Recent sessions')),
+          h('button', { class: 'btn ghost small', onclick: () => go('#einheiten') }, tr('📅 Ganzer Verlauf', '📅 Full history')),
+        ));
+      for (const w of workouts.slice(0, 5)) {
+        const cnt = setsByW.get(w.id) || 0;
         list.appendChild(h('div', { class: 'row-item', onclick: async () => {
           await db.setMeta('currentWorkout', w.id); route();
         } },
-          h('div', {}, h('strong', {}, fmtDate(w.date)),
-            h('span', { class: 'muted' }, ` · ${sets.length} Sätze${w.templateName ? ' · ' + w.templateName : ''}`)),
-          h('div', { class: 'row-actions' },
-            h('button', { class: 'btn ghost small danger', onclick: async (e) => {
-              e.stopPropagation();
-              const q = getLang() === 'en'
-                ? `Delete session from ${fmtDate(w.date)} incl. all ${sets.length} sets?`
-                : `Einheit vom ${fmtDate(w.date)} inkl. aller ${sets.length} Sätze löschen?`;
-              if (confirm(q)) {
-                await deleteWorkout(w.id); route();
-              }
-            } }, '🗑'),
-            h('span', { class: 'chev' }, '›'),
-          ),
+          h('div', {}, h('strong', {}, `${weekdayShort(w.date)}, ${fmtDate(w.date)}`),
+            h('span', { class: 'muted' }, ` · ${cnt} ${tr('Sätze', 'sets')}${w.templateName ? ' · ' + w.templateName : ''}`)),
+          h('span', { class: 'chev' }, '›'),
         ));
+      }
+      if (workouts.length > 5) {
+        list.appendChild(h('button', { class: 'btn ghost', onclick: () => go('#einheiten') },
+          tr(`Alle ${workouts.length} Einheiten ansehen`, `View all ${workouts.length} sessions`)));
       }
       wrap.appendChild(list);
     }
@@ -722,6 +739,81 @@ async function renderTraining() {
     showView();
     return row;
   }
+}
+
+// ==================================================================
+//  VERLAUF (alle Einheiten, nach Monat gruppiert)
+// ==================================================================
+async function renderHistory() {
+  const { enriched, workouts } = await loadEnrichedSets();
+  const wrap = h('div', { class: 'view' });
+  wrap.appendChild(h('a', { class: 'back', href: '#training' }, tr('‹ Zurück', '‹ Back')));
+  wrap.appendChild(h('h1', {}, tr('Trainings-Verlauf', 'Training history')));
+
+  if (!workouts.length) {
+    wrap.appendChild(h('div', { class: 'card' }, h('p', { class: 'muted' }, tr('Noch keine Einheiten erfasst.', 'No sessions logged yet.'))));
+    return wrap;
+  }
+
+  // Kennzahlen je Einheit aus den Sätzen aggregieren.
+  const agg = new Map(); // workoutId -> {sets, exIds:Set, volume, cats:Set}
+  for (const s of enriched) {
+    let a = agg.get(s.workoutId);
+    if (!a) { a = { sets: 0, exIds: new Set(), volume: 0, cats: new Set() }; agg.set(s.workoutId, a); }
+    a.sets += 1;
+    a.exIds.add(s.exerciseId);
+    a.volume += (s.weight || 0) * (s.reps || 0);
+    if (s.category) a.cats.add(s.category);
+  }
+
+  const sorted = [...workouts].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.id - a.id));
+
+  // Kopf-KPIs: Gesamtzahl + Einheiten in diesem Monat.
+  const thisYM = todayStr().slice(0, 7);
+  const inMonth = sorted.filter((w) => (w.date || '').slice(0, 7) === thisYM).length;
+  const totalVol = [...agg.values()].reduce((sum, a) => sum + a.volume, 0);
+  wrap.appendChild(h('div', { class: 'kpi-grid' },
+    kpi(String(workouts.length), tr('Einheiten gesamt', 'Total sessions')),
+    kpi(String(inMonth), tr('diesen Monat', 'this month')),
+    kpi(Math.round(totalVol).toLocaleString('de-DE') + ' kg', tr('Volumen gesamt', 'Total volume')),
+    kpi(String(agg.size ? Math.round([...agg.values()].reduce((s, a) => s + a.sets, 0) / workouts.length) : 0), tr('Ø Sätze/Einheit', 'Avg sets/session')),
+  ));
+
+  // Nach Monat gruppieren (Reihenfolge: neueste zuerst).
+  let curYM = null;
+  let card = null;
+  for (const w of sorted) {
+    const ym = (w.date || '').slice(0, 7);
+    if (ym !== curYM) {
+      curYM = ym;
+      card = h('div', { class: 'card' }, h('h2', {}, monthLabel(ym)));
+      wrap.appendChild(card);
+    }
+    const a = agg.get(w.id) || { sets: 0, exIds: new Set(), volume: 0, cats: new Set() };
+    const dots = [...a.cats].map((c) => h('span', { class: 'dot', style: `background:${CAT_COLOR[c] || '#94a3b8'}`, title: CAT_LABEL[c] || c }));
+    card.appendChild(h('div', { class: 'row-item', onclick: async () => {
+      await db.setMeta('currentWorkout', w.id); go('#training');
+    } },
+      h('div', {},
+        h('div', { class: 'set-line' },
+          h('strong', {}, `${weekdayShort(w.date)}, ${fmtDate(w.date)}`),
+          ...(w.templateName ? [h('span', { class: 'muted small' }, w.templateName)] : []),
+        ),
+        h('div', { class: 'muted small' }, `${a.exIds.size} ${tr('Übungen', 'exercises')} · ${a.sets} ${tr('Sätze', 'sets')} · ${Math.round(a.volume).toLocaleString('de-DE')} kg`),
+        h('div', { class: 'cat-dots' }, ...dots),
+      ),
+      h('div', { class: 'row-actions' },
+        h('button', { class: 'btn ghost small danger', onclick: async (e) => {
+          e.stopPropagation();
+          const q = tr(`Einheit vom ${fmtDate(w.date)} inkl. aller ${a.sets} Sätze löschen?`,
+            `Delete session from ${fmtDate(w.date)} incl. all ${a.sets} sets?`);
+          if (confirm(q)) { await deleteWorkout(w.id); route(); }
+        } }, '🗑'),
+        h('span', { class: 'chev' }, '›'),
+      ),
+    ));
+  }
+  return wrap;
 }
 
 // ==================================================================

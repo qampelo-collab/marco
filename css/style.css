@@ -135,6 +135,7 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .seg .btn.on { background: var(--primary); color: var(--primary-ink); border-color: var(--primary); }
 .cat-head { display: flex; align-items: center; gap: 8px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.cat-dots { display: flex; gap: 5px; margin-top: 5px; }
 
 /* Sets — nach Übung gruppiert */
 .ex-group { margin-top: 16px; }
