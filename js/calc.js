@@ -120,6 +120,12 @@ export function totalVolume(sets) {
   return sets.reduce((sum, s) => sum + setVolume(s.weight, s.reps), 0);
 }
 
+// Pausenzeit aus einem Schema wie "90s", "90-120s", "120s" in Sekunden lesen.
+export function parseRestSeconds(rest) {
+  const m = /(\d+)/.exec(rest || '');
+  return m ? parseInt(m[1], 10) : null;
+}
+
 // Bester Satz einer Menge nach geschätztem 1RM.
 // Liefert {value, set} – value gerundet, set der zugehörige Satz (oder null).
 export function bestE1rm(sets, formula = 'epley') {

@@ -8,6 +8,9 @@ import { extractSetsFromImage, VISION_MODELS, DEFAULT_VISION_MODEL } from './vis
 import { PLAN, installPlan, parseTargetSets } from './plan.js';
 import { applyTheme, ACCENTS, DEFAULT_ACCENT, DEFAULT_THEME } from './theme.js';
 import { applyI18n, getLang, setLang, detectLang, L } from './i18n.js';
+import { startRest, unlockAudio } from './timer.js';
+import { forecastValue, weeksToTarget, milestoneProgress } from './forecast.js';
+import { parseRestSeconds } from './calc.js';
 
 const app = document.getElementById('app');
 let FORMULA = 'epley';
@@ -64,6 +67,7 @@ const routes = {
   '#training': renderTraining,
   '#uebungen': renderExercises,
   '#plaene': renderPlans,
+  '#fortschritt': renderProgress,
   '#koerper': renderBody,
   '#ernaehrung': renderNutrition,
   '#aktivitaet': renderActivity,
@@ -107,6 +111,9 @@ function setActiveNav(hash) {
 }
 
 function go(hash) { location.hash = hash; }
+
+// Inline-Übersetzung für neu erzeugte Texte (umgeht den DOM-Übersetzungspass).
+function tr(de, en) { return getLang() === 'en' ? en : de; }
 
 // Einheit inkl. aller Sätze löschen.
 async function deleteWorkout(id) {
@@ -155,6 +162,13 @@ async function renderDashboard() {
     }
   }
   wrap.appendChild(coachCard);
+
+  // Link zur Fortschritts-/Forecast-Ansicht
+  wrap.appendChild(h('div', { class: 'card' },
+    h('div', { class: 'row-item', style: 'border-top:none', onclick: () => go('#fortschritt') },
+      h('div', {}, h('strong', {}, '📊 ' + tr('Fortschritt', 'Progress')),
+        h('div', { class: 'muted small' }, tr('Prognose & Milestones', 'Forecast & milestones'))),
+      h('span', { class: 'chev' }, '›'))));
 
   // Top-Übungen: Progression
   const byExercise = new Map();
@@ -252,6 +266,74 @@ async function renderTraining() {
         route();
       } }, 'Einheit starten'),
     ));
+
+    // --- Schnell-Erfassung (auch vergangene Trainings) ---
+    const qDate = h('input', { type: 'date', value: todayStr(), class: 'inp' });
+    const qEx = h('select', { class: 'inp' },
+      ...exercises.map((e) => h('option', { value: e.id }, `${e.name} (${CAT_LABEL[e.category] || e.category})`)));
+    const qWeight = h('input', { type: 'number', step: '0.5', inputmode: 'decimal', class: 'inp', placeholder: 'kg' });
+    const qReps = h('input', { type: 'number', step: '1', inputmode: 'numeric', class: 'inp', placeholder: tr('Wdh.', 'Reps') });
+    const qPhotoInp = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'inp-file' });
+    const qPreview = h('div', { class: 'photo-preview' });
+    const qHint = h('div', { class: 'hint' }, '');
+    let qPhoto = null;
+    const qMatch = (name) => {
+      if (!name) return null;
+      const low = name.toLowerCase();
+      let ex = exercises.find((e) => e.name.toLowerCase() === low)
+        || exercises.find((e) => e.name.toLowerCase().includes(low) || low.includes(e.name.toLowerCase()));
+      return ex ? ex.id : null;
+    };
+    qPhotoInp.addEventListener('change', async () => {
+      const file = qPhotoInp.files[0];
+      if (!file) { qPhoto = null; clear(qPreview); return; }
+      // Datum aus dem Foto übernehmen (Aufnahme-/Änderungsdatum).
+      if (file.lastModified) qDate.value = new Date(file.lastModified).toISOString().slice(0, 10);
+      qPhoto = await downscaleImage(file, 1000, 0.7);
+      clear(qPreview); qPreview.appendChild(h('img', { src: qPhoto }));
+    });
+    const qAiBtn = h('button', { class: 'btn ghost', onclick: async () => {
+      if (!apiKey) { qHint.textContent = tr('Kein API-Schlüssel – unter „Mehr" hinterlegen.', 'No API key — add it under “More”.'); return; }
+      if (!qPhoto) { qHint.textContent = tr('Bitte zuerst ein Foto aufnehmen/auswählen.', 'Please take/select a photo first.'); return; }
+      const o = qAiBtn.textContent; qAiBtn.textContent = tr('🤖 Lese Foto …', '🤖 Reading photo …'); qAiBtn.disabled = true; qHint.textContent = '';
+      try {
+        const { sets, note } = await extractSetsFromImage({ dataUrl: qPhoto, apiKey, model: visionModel, exerciseNames: exercises.map((e) => e.name) });
+        if (sets.length) {
+          const s = sets[0];
+          if (s.weight != null) qWeight.value = s.weight;
+          if (s.reps != null) qReps.value = s.reps;
+          const id = qMatch(s.exercise); if (id) qEx.value = id;
+          qHint.textContent = tr('Erkannt: ', 'Recognized: ') + `${s.exercise || '?'} · ${s.weight ?? '?'} kg × ${s.reps ?? '?'}` + (note ? ' · ' + note : '');
+        } else { qHint.textContent = tr('Keine Werte erkannt.', 'No values recognized.'); }
+      } catch (err) { qHint.textContent = '⚠️ ' + err.message; }
+      finally { qAiBtn.textContent = o; qAiBtn.disabled = false; }
+    } }, tr('🔍 Aus Foto lesen (KI)', '🔍 Read from photo (AI)'));
+
+    wrap.appendChild(h('div', { class: 'card' },
+      h('h2', {}, tr('⚡ Schnell erfassen (auch vergangene)', '⚡ Quick log (incl. past)')),
+      h('p', { class: 'muted small' }, tr('Foto aufnehmen (übernimmt das Datum), Werte prüfen, „Speichern & nächstes".',
+        'Take a photo (uses its date), check the values, then “Save & next”.')),
+      h('label', { class: 'field' }, h('span', {}, tr('Datum', 'Date')), qDate),
+      h('label', { class: 'field' }, h('span', {}, tr('Übung', 'Exercise')), qEx),
+      h('div', { class: 'field-row' },
+        h('label', { class: 'field' }, h('span', {}, tr('Gewicht', 'Weight')), qWeight),
+        h('label', { class: 'field' }, h('span', {}, tr('Wiederholungen', 'Reps')), qReps),
+      ),
+      h('label', { class: 'field' }, h('span', {}, tr('📷 Foto (inkl. Datum)', '📷 Photo (incl. date)')), qPhotoInp),
+      qPreview,
+      qAiBtn,
+      qHint,
+      h('button', { class: 'btn primary', onclick: async () => {
+        const w = parseFloat(qWeight.value), r = parseInt(qReps.value, 10);
+        if (!(w > 0) || !(r > 0)) { alert(tr('Bitte Gewicht und Wiederholungen eingeben.', 'Please enter weight and reps.')); return; }
+        const wid = await db.add('workouts', { date: qDate.value || todayStr(), notes: '' });
+        await db.add('sets', { workoutId: wid, exerciseId: parseInt(qEx.value, 10), weight: w, reps: r, rpe: null, photo: qPhoto || null, ts: Date.now() });
+        toast(tr('Gespeichert ✓ – nächstes', 'Saved ✓ — next'));
+        qWeight.value = ''; qReps.value = ''; qPhoto = null; qPhotoInp.value = ''; clear(qPreview); qHint.textContent = '';
+        qWeight.focus();
+      } }, tr('Speichern & nächstes', 'Save & next')),
+    ));
+
     // Vergangene Einheiten
     if (workouts.length) {
       const list = h('div', { class: 'card' }, h('h2', {}, 'Bisherige Einheiten'));
@@ -284,6 +366,16 @@ async function renderTraining() {
   // --- Offene Einheit: Sätze erfassen ---
   const sets = [...await db.byIndex('sets', 'workoutId', current.id)].sort((a, b) => (b.ts || 0) - (a.ts || 0));
   const eById = new Map(exercises.map((e) => [e.id, e]));
+
+  // Pausenzeit für eine Übung: aus dem Plan, sonst Standard (90s).
+  function restSecondsFor(exId) {
+    let sec = 90;
+    if (current.plan) {
+      const it = current.plan.find((p) => p.exerciseId === exId);
+      if (it) { const r = parseRestSeconds(it.rest); if (r) sec = r; }
+    }
+    return sec;
+  }
 
   const header = h('div', { class: 'card' },
     h('div', { class: 'chart-head' },
@@ -462,8 +554,11 @@ async function renderTraining() {
           ? `🏆 New record on ${nm}: ${newE} kg (was ${prevBest} kg)`
           : `🏆 Neuer Rekord bei ${nm}: ${newE} kg (vorher ${prevBest} kg)`);
       }
+      startRest(restSecondsFor(exId));       // Pause automatisch starten
       route();
     } }, '+ Satz speichern'),
+    h('button', { class: 'btn ghost big-pause', onclick: () => startRest(restSecondsFor(parseInt(exSel.value, 10))) },
+      '⏱ Pause starten'),
   );
   wrap.appendChild(form);
   prefillFromLast(false);
@@ -646,6 +741,64 @@ async function renderPlans() {
       await installPlan(db); route();
     }
   } }, 'Plan zurücksetzen / aktualisieren'));
+  return wrap;
+}
+
+// ==================================================================
+//  FORTSCHRITT (Forecast + Milestones)
+// ==================================================================
+async function renderProgress() {
+  const { enriched } = await loadEnrichedSets();
+  const wrap = h('div', { class: 'view' });
+  wrap.appendChild(h('a', { class: 'back', href: '#dashboard' }, tr('‹ Zurück', '‹ Back')));
+  wrap.appendChild(h('h1', {}, tr('Fortschritt', 'Progress')));
+
+  const byEx = new Map();
+  for (const s of enriched) { if (!byEx.has(s.exerciseId)) byEx.set(s.exerciseId, []); byEx.get(s.exerciseId).push(s); }
+  const items = [...byEx.entries()]
+    .map(([id, sets]) => ({ name: sets[0].exerciseName, prog: progression(sets, FORMULA) }))
+    .filter((p) => p.prog.sessions >= 2)
+    .sort((a, b) => b.prog.current - a.prog.current);
+
+  if (!items.length) {
+    wrap.appendChild(h('div', { class: 'card' }, h('p', { class: 'muted' },
+      tr('Erfasse mind. 2 Einheiten pro Übung – dann erscheinen hier Prognosen & Milestones.',
+         'Log at least 2 sessions per exercise — then forecasts & milestones appear here.'))));
+    return wrap;
+  }
+
+  // Push-Karte: Fokus auf die Übung mit flachstem Trend
+  const focus = [...items].sort((a, b) => a.prog.slopePerWeek - b.prog.slopePerWeek)[0];
+  wrap.appendChild(h('div', { class: 'card' },
+    h('h2', {}, '🔥 ' + tr('Dein Push', 'Your push')),
+    h('div', { class: 'sug-text' }, focus.prog.slopePerWeek > 0.05
+      ? tr(`Größter Hebel gerade: ${focus.name} (Trend +${focus.prog.slopePerWeek} kg/Woche). Bleib dran!`,
+           `Biggest lever right now: ${focus.name} (trend +${focus.prog.slopePerWeek} kg/week). Keep going!`)
+      : tr(`${focus.name} stagniert – hier liegt dein größtes Potenzial. Nächstes Mal +1 Wdh oder +2,5 kg.`,
+           `${focus.name} has stalled — your biggest upside. Next time +1 rep or +2.5 kg.`)),
+  ));
+
+  for (const it of items) {
+    const p = it.prog;
+    const ms = milestoneProgress(p.current);
+    const eta = weeksToTarget(p, ms.next);
+    const f12 = forecastValue(p, 12);
+    const etaTxt = eta == null ? ''
+      : eta === 0 ? ' (' + tr('erreichbar', 'reachable') + ')'
+      : ' (~' + eta + ' ' + tr('Wochen', 'weeks') + ')';
+    wrap.appendChild(h('div', { class: 'card' },
+      h('div', { class: 'chart-head' }, h('h2', {}, it.name),
+        h('span', { class: p.slopePerWeek >= 0 ? 'delta up' : 'delta down' },
+          (p.slopePerWeek >= 0 ? '+' : '') + p.slopePerWeek + ' kg/' + tr('Wo.', 'wk'))),
+      h('div', { class: 'kpi-grid' },
+        kpi(p.current + ' kg', tr('Aktuell (1RM)', 'Current (1RM)')),
+        kpi(f12 != null ? f12 + ' kg' : '–', tr('in 12 Wochen', 'in 12 weeks')),
+      ),
+      h('div', { class: 'muted small', style: 'margin-top:8px' },
+        tr('Nächster Meilenstein', 'Next milestone') + `: ${ms.next} kg` + etaTxt),
+      h('div', { class: 'pbar' }, h('i', { style: `width:${ms.pct}%` })),
+    ));
+  }
   return wrap;
 }
 
@@ -833,6 +986,9 @@ async function renderSettings() {
     h('h2', {}, 'Training'),
     h('div', { class: 'row-item', onclick: () => go('#plaene') },
       h('div', {}, h('strong', {}, '🗓️ Trainingspläne'), h('div', { class: 'muted small' }, 'Vorlagen starten (4er-Split)')),
+      h('span', { class: 'chev' }, '›')),
+    h('div', { class: 'row-item', onclick: () => go('#fortschritt') },
+      h('div', {}, h('strong', {}, '📊 Fortschritt'), h('div', { class: 'muted small' }, 'Prognose & Milestones')),
       h('span', { class: 'chev' }, '›')),
   ));
   wrap.appendChild(h('div', { class: 'card' },

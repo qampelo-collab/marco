@@ -74,6 +74,8 @@ const DICT = {
   '🎨 Aussehen': '🎨 Appearance', 'Modus': 'Mode', '🌙 Dunkel': '🌙 Dark', '☀️ Hell': '☀️ Light',
   'Akzentfarbe': 'Accent color', 'Sprache': 'Language',
   'Vorlagen starten (4er-Split)': 'Start templates (4-day split)',
+  '📊 Fortschritt': '📊 Progress', 'Prognose & Milestones': 'Forecast & milestones',
+  '⏱ Pause starten': '⏱ Start rest',
   'Protein & Kalorien erfassen': 'Log protein & calories', 'Schritte erfassen': 'Log steps',
   '1RM-Formel': '1RM formula', 'Formel zur Schätzung deiner Maximalkraft.':
     'Formula to estimate your one-rep max.', 'Epley (Standard)': 'Epley (default)',
