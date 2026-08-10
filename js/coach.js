@@ -1,7 +1,7 @@
 // coach.js — Regelbasierte Vorschläge ("was ergänzt dein Training sinnvoll?").
 // Ausgabe: Liste von {type, level, title, text}. level: 'info' | 'tip' | 'warn' | 'good'
 
-import { progression, weeklyVolumeByCategory, dayKey } from './calc.js';
+import { progression, weeklyVolumeByCategory, dayKey, round1 } from './calc.js';
 import { getLang } from './i18n.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -12,26 +12,46 @@ export function buildSuggestions({ enrichedSets, exercises, body, nutrition, act
   const out = [];
   const now = Date.now();
 
-  // 1) Plateau-Erkennung je Übung
+  // 1) Fortschritt / Plateau je Übung.
+  // Beurteilt wird das BESTE geschätzte 1RM in der jüngeren vs. der früheren
+  // Trainingshälfte. Das ist robuster als eine einzelne Trendlinie, die bei
+  // wechselnden Wiederholungsbereichen/Trainingsblöcken fälschlich flach
+  // wirken kann, obwohl die Höchstleistung klar gestiegen ist.
   const byExercise = groupBy(enrichedSets, (s) => s.exerciseId);
   for (const [exId, sets] of byExercise) {
     const prog = progression(sets, formula);
+    if (prog.sessions < 4) continue;                 // erst ab genug Historie beurteilen
     const name = sets[0].exerciseName || pick('Übung', 'exercise');
-    if (prog.sessions >= 4 && prog.slopePerWeek <= 0.05) {
+    const series = prog.series;                       // pro Tag bestes e1RM, aufsteigend
+    const half = Math.floor(series.length / 2);
+    const earlierBest = Math.max(...series.slice(0, half).map((p) => p.value));
+    const recentBest = Math.max(...series.slice(half).map((p) => p.value));
+    const gain = round1(recentBest - earlierBest);
+
+    if (recentBest > earlierBest + 0.5) {             // Höchstleistung gestiegen → Fortschritt
+      out.push({ type: 'progress', level: 'good',
+        title: pick(`Fortschritt: ${name}`, `Progress: ${name}`),
+        text: pick(
+          `Dein bestes geschätztes 1RM ist von ${earlierBest} auf ${recentBest} kg gestiegen (+${gain} kg). Weiter so – Gewicht/Wdh. Schritt für Schritt steigern.`,
+          `Your best estimated 1RM rose from ${earlierBest} to ${recentBest} kg (+${gain} kg). Keep it up — add weight/reps step by step.`),
+      });
+    } else if (recentBest < earlierBest - 0.5) {      // zuletzt schwächer als früher
+      out.push({ type: 'regress', level: 'tip',
+        title: pick(`${name}: zuletzt schwächer`, `${name}: recently weaker`),
+        text: pick(
+          `Bestes e1RM zuletzt ${recentBest} kg gegenüber ${earlierBest} kg früher (${gain} kg). ` +
+          `Oft nur Tagesform/Erholung – im Blick behalten, ggf. Schlaf/Ernährung/Deload prüfen.`,
+          `Best e1RM recently ${recentBest} kg vs ${earlierBest} kg earlier (${gain} kg). ` +
+          `Often just recovery/day-to-day — keep an eye on it, check sleep/nutrition/deload.`),
+      });
+    } else {                                          // Höchstleistung stagniert → echtes Plateau
       out.push({ type: 'plateau', level: 'warn',
         title: pick(`Plateau bei ${name}?`, `Plateau on ${name}?`),
         text: pick(
-          `Dein geschätztes 1RM stagniert (Trend ${prog.slopePerWeek} kg/Woche über ${prog.sessions} Einheiten). ` +
+          `Dein bestes geschätztes 1RM bewegt sich seit ${prog.sessions} Einheiten um ${recentBest} kg. ` +
           `Idee: Deload-Woche, Variation der Übung oder Wiederholungsbereich wechseln.`,
-          `Your estimated 1RM has stalled (trend ${prog.slopePerWeek} kg/week over ${prog.sessions} sessions). ` +
-          `Idea: a deload week, a variation of the exercise, or switch the rep range.`),
-      });
-    } else if (prog.sessions >= 3 && prog.slopePerWeek > 0.3) {
-      out.push({ type: 'progress', level: 'good',
-        title: pick(`Starke Entwicklung: ${name}`, `Strong progress: ${name}`),
-        text: pick(
-          `+${prog.slopePerWeek} kg/Woche im e1RM-Trend. Weiter so – ggf. Gewicht leicht erhöhen.`,
-          `+${prog.slopePerWeek} kg/week in the e1RM trend. Keep it up — consider adding a little weight.`),
+          `Your best estimated 1RM has hovered around ${recentBest} kg for ${prog.sessions} sessions. ` +
+          `Idea: a deload week, an exercise variation, or switch the rep range.`),
       });
     }
   }
