@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v18';
+const APP_VERSION = 'v19';
 
 const CAT_LABEL = { push: 'Drücken', pull: 'Ziehen', legs: 'Beine', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -118,6 +118,24 @@ function go(hash) { location.hash = hash; }
 
 // Inline-Übersetzung für neu erzeugte Texte (umgeht den DOM-Übersetzungspass).
 function tr(de, en) { return getLang() === 'en' ? en : de; }
+
+// Tendenz-Anzeige: ＋ (ging mehr, grün) / － (unsauber, gelb) / nichts (neutral).
+function tendBadge(t) {
+  if (t === '+') return h('span', { class: 'tend-badge plus' }, '＋');
+  if (t === '-') return h('span', { class: 'tend-badge minus' }, '－');
+  return null;
+}
+// 3-Wege-Auswahl der Tendenz (kein Button aktiv = neutral). Gibt {el, get, set}.
+function tendencyPicker(initial) {
+  let val = initial === '+' || initial === '-' ? initial : null;
+  const bMinus = h('button', { class: 'btn ghost small tend-minus', type: 'button' }, tr('－ unsauber', '－ grindy'));
+  const bPlus = h('button', { class: 'btn ghost small tend-plus', type: 'button' }, tr('＋ ging mehr', '＋ had more'));
+  const refresh = () => { bMinus.classList.toggle('on', val === '-'); bPlus.classList.toggle('on', val === '+'); };
+  bMinus.onclick = () => { val = val === '-' ? null : '-'; refresh(); };
+  bPlus.onclick = () => { val = val === '+' ? null : '+'; refresh(); };
+  refresh();
+  return { el: h('div', { class: 'seg' }, bMinus, bPlus), get: () => val, set: (v) => { val = (v === '+' || v === '-') ? v : null; refresh(); } };
+}
 
 // Einheit inkl. aller Sätze löschen.
 async function deleteWorkout(id) {
@@ -302,7 +320,7 @@ async function renderTraining() {
         let exId = qMatch(s.exercise);
         if (!exId && s.exercise) exId = await db.add('exercises', { name: s.exercise, category: 'sonstige', equipment: '', unit: 'kg' });
         if (!exId) continue;
-        await db.add('sets', { workoutId: wid, exerciseId: exId, weight: s.weight || 0, reps: s.reps || 0, rpe: null, photo: first ? qPhoto : null, ts: Date.now() });
+        await db.add('sets', { workoutId: wid, exerciseId: exId, weight: s.weight || 0, reps: s.reps || 0, rpe: null, tendency: s.tendency || null, photo: first ? qPhoto : null, ts: Date.now() });
         first = false; n++;
       }
       toast(tr(`Gespeichert ✓ (${n} Sätze)`, `Saved ✓ (${n} sets)`));
@@ -334,7 +352,7 @@ async function renderTraining() {
             tr(`${qRecognized.length} Sätze erkannt`, `${qRecognized.length} sets recognized`) +
             (res.date ? ' · ' + fmtDate(res.date) : '') + (res.note ? ' · ' + res.note : '');
           const list = h('div', { class: 'muted small', style: 'margin:6px 0' });
-          for (const x of qRecognized) list.appendChild(h('div', {}, `• ${x.exercise || '?'} — ${x.weight ?? '?'} kg × ${x.reps ?? '?'}`));
+          for (const x of qRecognized) list.appendChild(h('div', {}, `• ${x.exercise || '?'} — ${x.weight ?? '?'} kg × ${x.reps ?? '?'}${x.tendency === '+' ? ' ＋' : x.tendency === '-' ? ' －' : ''}`));
           qAll.appendChild(list);
           qAll.appendChild(h('button', { class: 'btn primary', onclick: saveWholeSession },
             tr(`✅ Ganzes Training speichern (${qRecognized.length} Sätze)`, `✅ Save whole session (${qRecognized.length} sets)`)));
@@ -522,6 +540,7 @@ async function renderTraining() {
         const s = sets[0];
         if (s.weight != null) weightInp.value = s.weight;
         if (s.reps != null) repsInp.value = s.reps;
+        addTend.set(s.tendency);
         const exId = matchExercise(s.exercise);
         if (exId) exSel.value = exId;
         updateHint();
@@ -533,7 +552,7 @@ async function renderTraining() {
         aiResult.appendChild(h('div', {}, `${sets.length} Sätze erkannt:`));
         for (const s of sets) {
           aiResult.appendChild(h('div', { class: 'small' },
-            `• ${s.exercise || '?'} — ${s.weight ?? '?'} kg × ${s.reps ?? '?'}`));
+            `• ${s.exercise || '?'} — ${s.weight ?? '?'} kg × ${s.reps ?? '?'}${s.tendency === '+' ? ' ＋' : s.tendency === '-' ? ' －' : ''}`));
         }
         aiResult.appendChild(h('button', { class: 'btn primary small', onclick: async () => {
           let first = true;
@@ -542,6 +561,7 @@ async function renderTraining() {
             await db.add('sets', {
               workoutId: current.id, exerciseId: exId,
               weight: s.weight || 0, reps: s.reps || 0, rpe: null,
+              tendency: s.tendency || null,
               photo: first ? photoData : null, ts: Date.now(),
             });
             first = false;
@@ -556,6 +576,7 @@ async function renderTraining() {
     }
   } }, '🔍 Aus Foto lesen (KI)');
 
+  const addTend = tendencyPicker(null);
   const form = h('div', { class: 'card' },
     h('h2', {}, 'Satz hinzufügen'),
     h('label', { class: 'field' }, h('span', {}, 'Übung'), exSel),
@@ -566,6 +587,7 @@ async function renderTraining() {
       h('label', { class: 'field' }, h('span', {}, 'RPE'), rpeInp),
     ),
     e1rmHint,
+    h('label', { class: 'field' }, h('span', {}, tr('Tendenz (optional)', 'Tendency (optional)')), addTend.el),
     h('label', { class: 'field' }, h('span', {}, '📷 Foto (optional – Display/Beleg)'), photoInp),
     preview,
     aiBtn,
@@ -584,6 +606,7 @@ async function renderTraining() {
         exerciseId: exId,
         weight, reps,
         rpe: rpeInp.value ? parseFloat(rpeInp.value) : null,
+        tendency: addTend.get(),
         photo: photoData || null,
         ts: Date.now(),
       });
@@ -639,14 +662,14 @@ async function renderTraining() {
     const row = h('div', { class: 'set-item' });
     const showView = () => {
       clear(row);
-      row.appendChild(s.photo
-        ? h('img', { class: 'set-thumb', src: s.photo, onclick: () => showPhoto(s.photo) })
-        : h('div', { class: 'set-thumb empty' }, '—'));
+      const line = h('div', { class: 'set-line' },
+        h('span', { class: 'set-no' }, `${tr('Satz', 'Set')} ${setNo}`),
+        h('strong', { class: 'set-load' }, `${s.weight} kg × ${s.reps} ${tr('Wdh.', 'reps')}`),
+      );
+      const badge = tendBadge(s.tendency);
+      if (badge) line.appendChild(badge);
       row.appendChild(h('div', { class: 'set-main' },
-        h('div', { class: 'set-line' },
-          h('span', { class: 'set-no' }, `${tr('Satz', 'Set')} ${setNo}`),
-          h('strong', { class: 'set-load' }, `${s.weight} kg × ${s.reps} ${tr('Wdh.', 'reps')}`),
-        ),
+        line,
         h('div', { class: 'muted small' }, `${s.rpe ? 'RPE ' + s.rpe + ' · ' : ''}e1RM ${round1(e1rm(s.weight, s.reps, FORMULA))} kg`),
       ));
       row.appendChild(h('button', { class: 'btn ghost small', onclick: showEdit, title: tr('Bearbeiten', 'Edit') }, '✎'));
@@ -660,18 +683,20 @@ async function renderTraining() {
       const wE = h('input', { type: 'number', step: '0.5', inputmode: 'decimal', class: 'inp', value: s.weight,
         placeholder: tr('kg (0 = Körpergewicht)', 'kg (0 = bodyweight)') });
       const rE = h('input', { type: 'number', step: '1', inputmode: 'numeric', class: 'inp', value: s.reps, placeholder: tr('Wdh.', 'Reps') });
+      const tend = tendencyPicker(s.tendency);
       row.appendChild(h('div', { class: 'set-main', style: 'width:100%' },
         exE,
         h('div', { class: 'field-row', style: 'margin-top:8px' },
           h('label', { class: 'field' }, h('span', {}, tr('Gewicht', 'Weight')), wE),
           h('label', { class: 'field' }, h('span', {}, tr('Wiederholungen', 'Reps')), rE),
         ),
+        h('label', { class: 'field' }, h('span', {}, tr('Tendenz', 'Tendency')), tend.el),
         h('div', { class: 'seg', style: 'margin-top:4px' },
           h('button', { class: 'btn primary small', onclick: async () => {
             let w = parseFloat(wE.value); if (isNaN(w)) w = 0;
             const r = parseInt(rE.value, 10);
             if (w < 0 || !(r > 0)) { alert(L('Bitte Gewicht und Wiederholungen eingeben.')); return; }
-            await db.put('sets', { ...s, exerciseId: parseInt(exE.value, 10), weight: w, reps: r });
+            await db.put('sets', { ...s, exerciseId: parseInt(exE.value, 10), weight: w, reps: r, tendency: tend.get() });
             route();   // kein startRest → keine erzwungene Pause beim Korrigieren
           } }, tr('✓ Speichern', '✓ Save')),
           h('button', { class: 'btn ghost small', onclick: showView }, tr('Abbrechen', 'Cancel')),

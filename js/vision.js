@@ -20,7 +20,7 @@ export const DEFAULT_VISION_MODEL = 'claude-opus-5';
 // Prompt: klare Anweisung, ausschließlich JSON zurückzugeben.
 function buildPrompt(exerciseNames) {
   const known = (exerciseNames || []).filter(Boolean);
-  const jsonShape = `{"date": "YYYY-MM-DD"|null, "name": string|null, "sets":[{"exercise": string|null, "weight": number|null, "reps": integer|null, "unit":"kg"|"lb"|"s"}], "note": string|null}`;
+  const jsonShape = `{"date": "YYYY-MM-DD"|null, "name": string|null, "sets":[{"exercise": string|null, "weight": number|null, "reps": integer|null, "unit":"kg"|"lb"|"s", "tendency": "+"|"-"|null}], "note": string|null}`;
   if (en()) {
     const knownBlock = known.length
       ? `\nKnown exercise names (map each exercise to one of these if possible, otherwise use the written name): ${known.join(', ')}.`
@@ -30,6 +30,7 @@ function buildPrompt(exerciseNames) {
       `- Header: "DATUM" (date, format DD.MM.YYYY), "TRAININGSNAME" (session name), a weekday checkbox row, "ANFANG"/"ENDE" (start/end time).\n` +
       `- Column "ÜBUNGEN": the exercises. Right next to each name there may be a target annotation (rest seconds and/or a rep range, e.g. "90-120" or "6-10|~12"). IGNORE these — they are targets, not performed values.\n` +
       `- Columns "SATZ 1" … "SATZ 6": the performed sets. Each FILLED cell holds two stacked numbers: the TOP number is the weight in kg, the BOTTOM number is the reps. Read every filled cell, left to right, as one set for that exercise. If a cell has only one number, treat it as reps (weight null).\n` +
+      `- A cell may also contain a small "+" or "-" mark (next to the numbers): "+" means the athlete felt more reps were possible (left reps in reserve) → set "tendency":"+". "-" means the last reps were a bit grindy / the weight was slightly too heavy → set "tendency":"-". If there is no such mark, set "tendency":null.\n` +
       `Read "DATUM" into "date" (convert to YYYY-MM-DD) and "TRAININGSNAME" into "name". If instead the photo is a machine display or a simple note, just read the visible sets.` +
       knownBlock +
       `\n\nRespond ONLY with a JSON object in exactly this shape — no markdown, no code fence, no explanation:\n` +
@@ -45,6 +46,7 @@ function buildPrompt(exerciseNames) {
     `- Kopf: "DATUM" (Datum, Format TT.MM.JJJJ), "TRAININGSNAME", eine Wochentag-Kästchenreihe, "ANFANG"/"ENDE" (Start-/Endzeit).\n` +
     `- Spalte "ÜBUNGEN": die Übungen. Direkt neben dem Namen stehen evtl. Zielangaben (Pausensekunden und/oder Wdh.-Bereich, z.B. "90-120" oder "6-10|~12"). IGNORIERE diese — das sind Ziele, keine geleisteten Werte.\n` +
     `- Spalten "SATZ 1" … "SATZ 6": die geleisteten Sätze. Jede AUSGEFÜLLTE Zelle enthält zwei übereinander stehende Zahlen: die OBERE ist das Gewicht in kg, die UNTERE sind die Wiederholungen. Lies jede ausgefüllte Zelle von links nach rechts als einen Satz dieser Übung. Steht nur eine Zahl, werte sie als Wiederholungen (Gewicht null).\n` +
+    `- Eine Zelle kann zusätzlich ein kleines "+" oder "-" enthalten (neben den Zahlen): "+" heißt, es wäre noch mehr gegangen (Reps in Reserve) → setze "tendency":"+". "-" heißt, die letzten Wiederholungen waren schon etwas unsauber / das Gewicht war leicht zu hoch → setze "tendency":"-". Ohne solche Markierung setze "tendency":null.\n` +
     `Lies "DATUM" in "date" (umgewandelt nach YYYY-MM-DD) und "TRAININGSNAME" in "name". Falls das Foto stattdessen ein Geräte-Display oder eine einfache Notiz ist, lies einfach die sichtbaren Sätze.` +
     knownBlock +
     `\n\nAntworte AUSSCHLIESSLICH mit einem JSON-Objekt in genau dieser Form – ohne Markdown, ohne Code-Zaun, ohne Erklärtext:\n` +
@@ -112,6 +114,7 @@ export function parseResponse(apiJson) {
       weight: numOrNull(s.weight),
       reps: intOrNull(s.reps),
       unit: ['kg', 'lb', 's'].includes(s.unit) ? s.unit : 'kg',
+      tendency: normTendency(s.tendency),
     }))
     .filter((s) => s.weight != null || s.reps != null);
 
@@ -136,6 +139,14 @@ function normalizeDate(d) {
 
 function numOrNull(v) { const n = parseFloat(v); return isNaN(n) ? null : n; }
 function intOrNull(v) { const n = parseInt(v, 10); return isNaN(n) ? null : n; }
+// Tendenz-Markierung normalisieren: '+' (ging mehr), '-' (unsauber) oder null.
+function normTendency(v) {
+  if (v == null) return null;
+  const s = String(v).trim().toLowerCase();
+  if (s === '+' || s === 'plus') return '+';
+  if (s === '-' || s === 'minus') return '-';
+  return null;
+}
 
 // Hauptfunktion: Foto -> erkannte Sätze. `fetchImpl` für Tests injizierbar.
 export async function extractSetsFromImage({ dataUrl, apiKey, model, exerciseNames, fetchImpl }) {

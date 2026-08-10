@@ -148,6 +148,13 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .set-no { color: var(--muted); font-size: 13px; min-width: 52px; }
 .set-load { font-size: 15px; }
 
+/* Tendenz-Markierung: ＋ (ging mehr) / － (unsauber) */
+.tend-badge { display: inline-block; font-weight: 800; line-height: 1.5; border-radius: 6px; padding: 0 7px; font-size: 13px; }
+.tend-badge.plus { color: var(--primary-ink); background: var(--primary); }
+.tend-badge.minus { color: #3b2a00; background: #fbbf24; }
+.seg .btn.tend-plus.on { background: var(--primary); color: var(--primary-ink); border-color: var(--primary); }
+.seg .btn.tend-minus.on { background: #fbbf24; color: #3b2a00; border-color: #fbbf24; }
+
 .set-item {
   display: flex; align-items: center; gap: 12px;
   padding: 10px 0; border-top: 1px solid var(--border);
