@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v54';
+const APP_VERSION = 'v55';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -521,35 +521,58 @@ async function renderTraining() {
     const mReps = h('input', { type: 'number', step: '1', inputmode: 'numeric', class: 'inp', placeholder: tr('Wdh.', 'Reps') });
     const mTend = tendencyPicker(null);
     const mStartDate = h('input', { type: 'date', value: todayStr(), class: 'inp' });
+    const templates = [...await db.all('templates')];
+
+    const manualChildren = [
+      h('p', { class: 'muted small' }, tr('Einzelnen Satz ohne Foto erfassen.', 'Log a single set without a photo.')),
+      h('label', { class: 'field' }, h('span', {}, tr('Datum', 'Date')), mDate),
+      h('label', { class: 'field' }, h('span', {}, tr('Übung', 'Exercise')), mEx),
+      h('div', { class: 'field-row' },
+        h('label', { class: 'field' }, h('span', {}, tr('Gewicht', 'Weight')), mWeight),
+        h('label', { class: 'field' }, h('span', {}, tr('Wiederholungen', 'Reps')), mReps),
+      ),
+      h('label', { class: 'field' }, h('span', {}, tr('Tendenz (optional)', 'Tendency (optional)')), mTend.el),
+      h('button', { class: 'btn primary', onclick: async () => {
+        let w = parseFloat(mWeight.value); if (isNaN(w)) w = 0;
+        const r = parseInt(mReps.value, 10);
+        if (w < 0 || !(r > 0)) { alert(tr('Bitte Gewicht und Wiederholungen eingeben.', 'Please enter weight and reps.')); return; }
+        const wid = await db.add('workouts', { date: mDate.value || todayStr(), notes: '' });
+        await db.add('sets', { workoutId: wid, exerciseId: parseInt(mEx.value, 10), weight: w, reps: r, rpe: null, tendency: mTend.get(), photo: null, ts: Date.now() });
+        toast(tr('Gespeichert ✓ – nächstes', 'Saved ✓ — next'));
+        mWeight.value = ''; mReps.value = ''; mTend.set(null); mWeight.focus();
+      } }, tr('Speichern & nächstes', 'Save & next')),
+    ];
+
+    // Ein komplettes hinterlegtes Training starten (falls Pläne vorhanden).
+    if (templates.length) {
+      const tSel = h('select', { class: 'inp' }, ...templates.map((t) => h('option', { value: t.id }, t.name)));
+      manualChildren.push(
+        h('div', { class: 'muted small', style: 'margin:16px 0 6px' }, tr('… oder ein hinterlegtes Training starten:', '… or start a saved workout:')),
+        h('label', { class: 'field' }, h('span', {}, tr('Trainingsplan', 'Plan')), tSel),
+        h('button', { class: 'btn primary', onclick: async () => {
+          const t = templates.find((x) => x.id === parseInt(tSel.value, 10));
+          if (!t) return;
+          const wid = await db.add('workouts', { date: mStartDate.value || todayStr(), notes: '', templateName: t.name, plan: t.items });
+          await db.setMeta('currentWorkout', wid);
+          route();
+        } }, tr('▶ Training starten', '▶ Start workout')),
+      );
+    }
+
+    // Oder eine ganz leere Einheit live mitschreiben.
+    manualChildren.push(
+      h('div', { class: 'muted small', style: 'margin:16px 0 6px' }, tr('… oder eine leere Einheit live mitschreiben:', '… or log an empty session live:')),
+      h('label', { class: 'field' }, h('span', {}, tr('Datum', 'Date')), mStartDate),
+      h('button', { class: 'btn ghost', onclick: async () => {
+        const id = await db.add('workouts', { date: mStartDate.value || todayStr(), notes: '' });
+        await db.setMeta('currentWorkout', id);
+        route();
+      } }, tr('▶ Leere Einheit live starten', '▶ Start empty live session')),
+    );
 
     wrap.appendChild(h('details', { class: 'manual-details' },
-      h('summary', {}, tr('✏️ Stattdessen manuell erfassen', '✏️ Log manually instead')),
-      h('div', { class: 'card', style: 'margin-top:10px' },
-        h('p', { class: 'muted small' }, tr('Einzelnen Satz ohne Foto erfassen.', 'Log a single set without a photo.')),
-        h('label', { class: 'field' }, h('span', {}, tr('Datum', 'Date')), mDate),
-        h('label', { class: 'field' }, h('span', {}, tr('Übung', 'Exercise')), mEx),
-        h('div', { class: 'field-row' },
-          h('label', { class: 'field' }, h('span', {}, tr('Gewicht', 'Weight')), mWeight),
-          h('label', { class: 'field' }, h('span', {}, tr('Wiederholungen', 'Reps')), mReps),
-        ),
-        h('label', { class: 'field' }, h('span', {}, tr('Tendenz (optional)', 'Tendency (optional)')), mTend.el),
-        h('button', { class: 'btn primary', onclick: async () => {
-          let w = parseFloat(mWeight.value); if (isNaN(w)) w = 0;
-          const r = parseInt(mReps.value, 10);
-          if (w < 0 || !(r > 0)) { alert(tr('Bitte Gewicht und Wiederholungen eingeben.', 'Please enter weight and reps.')); return; }
-          const wid = await db.add('workouts', { date: mDate.value || todayStr(), notes: '' });
-          await db.add('sets', { workoutId: wid, exerciseId: parseInt(mEx.value, 10), weight: w, reps: r, rpe: null, tendency: mTend.get(), photo: null, ts: Date.now() });
-          toast(tr('Gespeichert ✓ – nächstes', 'Saved ✓ — next'));
-          mWeight.value = ''; mReps.value = ''; mTend.set(null); mWeight.focus();
-        } }, tr('Speichern & nächstes', 'Save & next')),
-        h('div', { class: 'muted small', style: 'margin:14px 0 6px' }, tr('… oder eine Einheit live mitschreiben:', '… or log a session live:')),
-        h('label', { class: 'field' }, h('span', {}, tr('Datum', 'Date')), mStartDate),
-        h('button', { class: 'btn ghost', onclick: async () => {
-          const id = await db.add('workouts', { date: mStartDate.value || todayStr(), notes: '' });
-          await db.setMeta('currentWorkout', id);
-          route();
-        } }, tr('▶ Leere Einheit live starten', '▶ Start empty live session')),
-      ),
+      h('summary', {}, tr('✏️ Manuell erfassen / Training starten', '✏️ Log manually / start a workout')),
+      h('div', { class: 'card', style: 'margin-top:10px' }, ...manualChildren),
     ));
 
     // Letzte Einheiten (Kurzvorschau) + Link zum ganzen Verlauf
