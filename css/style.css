@@ -109,6 +109,7 @@ h2 { font-size: 16px; margin: 0 0 12px; }
   margin-top: 4px;
 }
 .btn.primary { background: var(--primary); color: var(--primary-ink); border-color: var(--primary); }
+.btn.on { background: var(--primary); color: var(--primary-ink); border-color: var(--primary); }
 .btn.ghost { background: transparent; }
 .btn.small { width: auto; padding: 7px 12px; font-size: 13px; margin: 0; }
 .btn.danger { color: var(--danger); border-color: var(--danger); }

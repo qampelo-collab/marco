@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v48';
+const APP_VERSION = 'v49';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -211,6 +211,49 @@ async function deleteWorkout(id) {
   if (cur === id) await db.setMeta('currentWorkout', null);
 }
 
+// IDs der Hauptübungen (Meta). Beim ersten Mal automatisch aus Bankdrücken /
+// Kniebeugen / Klimmzüge (falls vorhanden) vorbelegt.
+async function getMainLiftIds(exercises) {
+  let ids = await db.getMeta('mainLifts', null);
+  if (ids == null) {
+    const wanted = ['bankdrucken', 'kniebeugen', 'klimmzuge'];
+    ids = exercises.filter((e) => wanted.includes(normExName(e.name))).map((e) => e.id);
+    await db.setMeta('mainLifts', ids);
+  }
+  return ids.filter((id) => exercises.some((e) => e.id === id));
+}
+
+// Kompakte Zeile für eine Hauptübung (gewichts- oder wiederholungsbasiert).
+function mainLiftRow(ex, ss) {
+  let subText = tr('noch keine Daten', 'no data yet');
+  let chip = null;
+  if (ss.length) {
+    const bodyweight = ss.every((s) => !(s.weight > 0)) && ss.some((s) => s.reps > 0);
+    if (bodyweight) {
+      const rp = repsProgression(ss);
+      const half = Math.floor(rp.series.length / 2);
+      const eaB = rp.series.slice(0, half).reduce((m, p) => Math.max(m, p.value), 0);
+      const reB = rp.series.slice(half).reduce((m, p) => Math.max(m, p.value), 0);
+      subText = `${rp.current} ${tr('Wdh. gesamt', 'total reps')} · ${tr('Best', 'best')} ${rp.best}`;
+      const d = reB - eaB;
+      chip = h('span', { class: 'delta ' + (d > 0 ? 'up' : d < 0 ? 'down' : '') }, d > 0 ? '▲' : d < 0 ? '▼' : '–');
+    } else {
+      const be = bestE1rm(ss, FORMULA);
+      const prog = progression(ss, FORMULA);
+      const reps = be.set && be.set.reps > 0 ? be.set.reps : 5;
+      const tW = roundToStep(weightForReps(nextMilestone(be.value), reps, FORMULA));
+      const curW = be.set ? be.set.weight : 0;
+      subText = `${curW}×${reps} → ${tW}×${reps} kg`;
+      const sl = prog.slopePerWeek;
+      chip = h('span', { class: 'delta ' + (sl >= 0 ? 'up' : 'down') }, (sl >= 0 ? '+' : '') + sl + ' kg/' + tr('Wo.', 'wk'));
+    }
+  }
+  return h('div', { class: 'row-item', onclick: () => go('#uebungen?id=' + ex.id) },
+    h('div', {}, h('strong', {}, ex.name), h('div', { class: 'muted small' }, subText)),
+    h('div', { class: 'row-actions' }, ...(chip ? [chip] : []), h('span', { class: 'chev' }, '›')),
+  );
+}
+
 // ==================================================================
 //  DASHBOARD
 // ==================================================================
@@ -234,6 +277,19 @@ async function renderDashboard() {
     kpi(latestBody ? latestBody.weight + ' kg' : '–', 'Körpergewicht'),
   );
   wrap.appendChild(kpis);
+
+  // ⭐ Hauptübungen – eigener Fokus
+  const mainIds = await getMainLiftIds(exercises);
+  if (mainIds.length) {
+    const setsByEx = new Map();
+    for (const s of enriched) { if (!setsByEx.has(s.exerciseId)) setsByEx.set(s.exerciseId, []); setsByEx.get(s.exerciseId).push(s); }
+    const card = h('div', { class: 'card' }, h('h2', {}, '⭐ ' + tr('Hauptübungen', 'Main lifts')));
+    for (const id of mainIds) {
+      const ex = exercises.find((e) => e.id === id);
+      if (ex) card.appendChild(mainLiftRow(ex, setsByEx.get(id) || []));
+    }
+    wrap.appendChild(card);
+  }
 
   // Coach-Vorschläge
   const suggestions = buildSuggestions({ enrichedSets: enriched, exercises, body, nutrition, activity, formula: FORMULA });
@@ -1019,6 +1075,20 @@ async function renderExerciseDetail(id) {
   const wrap = h('div', { class: 'view' });
   wrap.appendChild(h('a', { class: 'back', href: '#uebungen' }, '‹ Zurück zu Übungen'));
   wrap.appendChild(h('h1', {}, ex ? ex.name : 'Übung'));
+
+  // ⭐ Als Hauptübung markieren (erscheint dann auf der Übersicht).
+  if (ex) {
+    const isMain = ((await db.getMeta('mainLifts', [])) || []).includes(id);
+    wrap.appendChild(h('button', { class: 'btn ghost small' + (isMain ? ' on' : ''), style: 'width:auto',
+      onclick: async () => {
+        let ids = (await db.getMeta('mainLifts', [])) || [];
+        const was = ids.includes(id);
+        ids = was ? ids.filter((x) => x !== id) : [...ids, id];
+        await db.setMeta('mainLifts', ids);
+        toast(was ? tr('Aus Hauptübungen entfernt', 'Removed from main lifts') : tr('Als Hauptübung markiert ★', 'Marked as main lift ★'));
+        route();
+      } }, isMain ? tr('★ Hauptübung', '★ Main lift') : tr('☆ Als Hauptübung', '☆ Mark as main lift')));
+  }
 
   // Übung bearbeiten (Name, Kategorie, Gerät, Pause) + löschen — eingeklappt,
   // wird erst unten angehängt.
