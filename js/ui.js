@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v46';
+const APP_VERSION = 'v47';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -990,13 +990,13 @@ async function renderExercises() {
   return wrap;
 }
 
-// Wiederholungs-Progression für Körpergewichts-Übungen: bestes (= höchste
-// Wiederholungszahl) je Tag als Zeitreihe.
+// Wiederholungs-Progression für Körpergewichts-Übungen: SUMME der
+// Wiederholungen aus allen Sätzen je Einheit (Tag) als Zeitreihe.
 function repsProgression(sets) {
   const byDay = new Map();
   for (const s of sets) {
     if (!(s.reps > 0) || !s.date) continue;
-    if (!byDay.has(s.date) || s.reps > byDay.get(s.date)) byDay.set(s.date, s.reps);
+    byDay.set(s.date, (byDay.get(s.date) || 0) + s.reps);
   }
   const series = [...byDay.entries()].map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date));
   const first = series.length ? series[0].value : 0;
@@ -1131,7 +1131,7 @@ async function renderExerciseDetail(id) {
     const earlierBest = Math.max(...series.slice(0, half).map((p) => p.value));
     const recentBest = Math.max(...series.slice(half).map((p) => p.value));
     const unit = bodyweight ? tr('Wdh.', 'reps') : 'kg';
-    const what = bodyweight ? tr('Beste Wiederholungen', 'Best reps') : tr('Bestes 1RM', 'Best 1RM');
+    const what = bodyweight ? tr('Gesamt-Wdh./Einheit', 'Total reps/session') : tr('Bestes 1RM', 'Best 1RM');
     let level, title, text;
     if (recentBest > earlierBest + (bodyweight ? 0.5 : 0.5)) {
       level = 'good'; title = tr('Im Aufwärtstrend', 'Trending up');
@@ -1168,22 +1168,22 @@ async function renderExerciseDetail(id) {
   // --- Übersicht (KPIs + Charts) — nur mit auswertbaren Werten ---
   if (prog.sessions > 0 && bodyweight) {
     wrap.appendChild(h('div', { class: 'kpi-grid' },
-      kpi(repsProg.current + ' ' + tr('Wdh.', 'reps'), tr('Aktuell (max)', 'Current (max)')),
-      kpi(repsProg.best + ' ' + tr('Wdh.', 'reps'), tr('Bestleistung', 'Best')),
+      kpi(repsProg.current + ' ' + tr('Wdh.', 'reps'), tr('Aktuell (gesamt)', 'Current (total)')),
+      kpi(repsProg.best + ' ' + tr('Wdh.', 'reps'), tr('Bestleistung (gesamt)', 'Best (total)')),
       kpi((repsProg.changeAbs >= 0 ? '+' : '') + repsProg.changeAbs, tr('Wdh. seit Start', 'reps since start')),
       kpi(String(repsProg.sessions), tr('Einheiten', 'sessions')),
     ));
     wrap.appendChild(h('div', { class: 'card' },
-      h('h2', {}, '📈 ' + tr('Wiederholungen (max/Tag)', 'Reps (max/day)')),
+      h('h2', {}, '📈 ' + tr('Wiederholungen gesamt / Einheit', 'Total reps / session')),
       lineChart(repsProg.series, { color: '#4ade80' }),
     ));
-    // Gesamt-Wiederholungen je Einheit
-    const repsByDay = new Map();
-    for (const s of sets) { if (s.reps > 0 && s.date) repsByDay.set(s.date, (repsByDay.get(s.date) || 0) + s.reps); }
-    const repSeries = [...repsByDay.entries()].map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date));
+    // Zusatz: bester Einzelsatz je Einheit
+    const maxByDay = new Map();
+    for (const s of sets) { if (s.reps > 0 && s.date) maxByDay.set(s.date, Math.max(maxByDay.get(s.date) || 0, s.reps)); }
+    const maxSeries = [...maxByDay.entries()].map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date));
     wrap.appendChild(h('div', { class: 'card' },
-      h('h2', {}, '📊 ' + tr('Wiederholungen je Einheit', 'Reps per session')),
-      lineChart(repSeries, { color: '#60a5fa' }),
+      h('h2', {}, '📊 ' + tr('Bester Satz (Wdh.)', 'Best set (reps)')),
+      lineChart(maxSeries, { color: '#60a5fa' }),
     ));
   } else if (prog.sessions > 0) {
     wrap.appendChild(h('div', { class: 'kpi-grid' },
