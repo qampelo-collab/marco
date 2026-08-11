@@ -35,21 +35,33 @@ export function buildSuggestions({ enrichedSets, exercises, body, nutrition, act
         'Leg volume low vs. upper body. Add squats/deadlifts.') });
   }
 
-  // 2) Rückgang oder Plateau — nur der auffälligste Lift (bestes e1RM
-  //    jüngere vs. frühere Trainingshälfte).
+  // 2) Rückgang oder Plateau — nur der auffälligste Lift. Für gewichtsbasierte
+  //    Übungen anhand des besten e1RM, für Körpergewichts-Übungen (0 kg, z.B.
+  //    Klimmzüge) anhand der Gesamt-Wiederholungen je Einheit.
   const stalls = [];
   for (const [, sets] of byExercise) {
     const prog = progression(sets, formula);
     if (prog.sessions < 4) continue;
-    const series = prog.series;
+    const name = sets[0].exerciseName || pick('Übung', 'exercise');
+    const bodyweight = sets.every((s) => !(s.weight > 0)) && sets.some((s) => s.reps > 0);
+    let series, unit;
+    if (bodyweight) {
+      const byDay = new Map();
+      for (const s of sets) { if (s.reps > 0 && s.date) byDay.set(s.date, (byDay.get(s.date) || 0) + s.reps); }
+      series = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([, v]) => ({ value: v }));
+      unit = pick('Wdh.', 'reps');
+    } else {
+      series = prog.series;
+      unit = 'kg';
+    }
+    if (series.length < 4) continue;
     const half = Math.floor(series.length / 2);
     const earlierBest = Math.max(...series.slice(0, half).map((p) => p.value));
     const recentBest = Math.max(...series.slice(half).map((p) => p.value));
-    const name = sets[0].exerciseName || pick('Übung', 'exercise');
     if (recentBest < earlierBest - 0.5) {
-      stalls.push({ kind: 'regress', name, earlierBest, recentBest, gap: earlierBest - recentBest });
+      stalls.push({ kind: 'regress', name, unit, earlierBest, recentBest, gap: earlierBest - recentBest });
     } else if (recentBest <= earlierBest + 0.5) {
-      stalls.push({ kind: 'plateau', name, recentBest, sessions: prog.sessions });
+      stalls.push({ kind: 'plateau', name, unit, recentBest, sessions: series.length });
     }
   }
   stalls.sort((a, b) => (b.kind === 'regress') - (a.kind === 'regress') || (b.gap || 0) - (a.gap || 0) || (b.sessions || 0) - (a.sessions || 0));
@@ -58,13 +70,13 @@ export function buildSuggestions({ enrichedSets, exercises, body, nutrition, act
     if (s.kind === 'regress') {
       cand.push({ p: 88, level: 'warn',
         title: pick(`${s.name}: zuletzt schwächer`, `${s.name}: recently weaker`),
-        text: pick(`Bestes 1RM von ${s.earlierBest} auf ${s.recentBest} kg gefallen. Erholung/Deload prüfen.`,
-          `Best 1RM dropped from ${s.earlierBest} to ${s.recentBest} kg. Check recovery/deload.`) });
+        text: pick(`Bestwert von ${s.earlierBest} auf ${s.recentBest} ${s.unit} gefallen. Erholung/Deload prüfen.`,
+          `Best dropped from ${s.earlierBest} to ${s.recentBest} ${s.unit}. Check recovery/deload.`) });
     } else {
       cand.push({ p: 72, level: 'tip',
         title: pick(`${s.name}: Plateau`, `${s.name}: plateau`),
-        text: pick(`Bestes 1RM seit ${s.sessions} Einheiten bei ~${s.recentBest} kg. Deload oder Wdh.-Bereich wechseln.`,
-          `Best 1RM stuck around ${s.recentBest} kg for ${s.sessions} sessions. Deload or switch rep range.`) });
+        text: pick(`Bestwert seit ${s.sessions} Einheiten bei ~${s.recentBest} ${s.unit}. Deload oder Reiz variieren.`,
+          `Best stuck around ${s.recentBest} ${s.unit} for ${s.sessions} sessions. Deload or vary the stimulus.`) });
     }
   }
 
