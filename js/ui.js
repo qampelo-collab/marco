@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v49';
+const APP_VERSION = 'v50';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -863,10 +863,11 @@ async function renderHistory() {
   const agg = new Map(); // workoutId -> {sets, exIds:Set, volume, cats:Set}
   for (const s of enriched) {
     let a = agg.get(s.workoutId);
-    if (!a) { a = { sets: 0, exIds: new Set(), volume: 0, cats: new Set() }; agg.set(s.workoutId, a); }
+    if (!a) { a = { sets: 0, exIds: new Set(), volume: 0, reps: 0, cats: new Set() }; agg.set(s.workoutId, a); }
     a.sets += 1;
     a.exIds.add(s.exerciseId);
     a.volume += (s.weight || 0) * (s.reps || 0);
+    a.reps += (s.reps || 0);
     if (s.category) a.cats.add(s.category);
   }
 
@@ -949,7 +950,8 @@ async function renderHistory() {
           h('strong', {}, `${weekdayShort(w.date)}, ${fmtDate(w.date)}`),
           ...(w.templateName ? [h('span', { class: 'muted small' }, w.templateName)] : []),
         ),
-        h('div', { class: 'muted small' }, `${a.exIds.size} ${tr('Übungen', 'exercises')} · ${a.sets} ${tr('Sätze', 'sets')} · ${Math.round(a.volume).toLocaleString('de-DE')} kg`),
+        h('div', { class: 'muted small' }, `${a.exIds.size} ${tr('Übungen', 'exercises')} · ${a.sets} ${tr('Sätze', 'sets')} · ` +
+          (a.volume > 0 ? `${Math.round(a.volume).toLocaleString('de-DE')} kg` : `${a.reps} ${tr('Wdh.', 'reps')}`)),
         h('div', { class: 'cat-dots' }, ...dots),
       ),
       h('div', { class: 'row-actions' },
@@ -1287,7 +1289,7 @@ async function renderExerciseDetail(id) {
   for (const d of days) {
     const daySets = byDay.get(d).sort((a, b) => (a.ts || 0) - (b.ts || 0));
     const dayHead = bodyweight
-      ? `${Math.max(...daySets.map((s) => s.reps || 0))} ${tr('Wdh. max', 'reps max')}`
+      ? `${daySets.reduce((a, s) => a + (s.reps || 0), 0)} ${tr('Wdh. gesamt', 'total reps')}`
       : (() => { const b = bestE1rm(daySets, FORMULA).value; return b ? 'e1RM ' + b + ' kg' : ''; })();
     const group = h('div', { class: 'ex-group' },
       h('div', { class: 'ex-group-head' },
