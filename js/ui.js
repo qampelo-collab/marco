@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v51';
+const APP_VERSION = 'v52';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -320,21 +320,32 @@ async function renderDashboard() {
     byExercise.get(s.exerciseId).push(s);
   }
   const progs = [...byExercise.entries()]
-    .map(([id, sets]) => ({ id, name: sets[0].exerciseName, prog: progression(sets, FORMULA) }))
-    .filter((p) => p.prog.sessions >= 2)
-    .sort((a, b) => b.prog.sessions - a.prog.sessions)
+    .map(([id, sets]) => {
+      const prog = progression(sets, FORMULA);
+      const bodyweight = sets.every((s) => !(s.weight > 0)) && sets.some((s) => s.reps > 0);
+      let series, deltaAbs, unit, zero;
+      if (bodyweight) {
+        const rp = repsProgression(sets);
+        series = rp.series; deltaAbs = rp.changeAbs; unit = 'Wdh.'; zero = true;
+      } else {
+        series = prog.series; deltaAbs = prog.changeAbs; unit = 'kg'; zero = false;
+      }
+      return { id, name: sets[0].exerciseName, sessions: prog.sessions, slope: prog.slopePerWeek, series, deltaAbs, unit, zero, bodyweight };
+    })
+    .filter((p) => p.sessions >= 2)
+    .sort((a, b) => b.sessions - a.sessions)
     .slice(0, 3);
 
   if (progs.length) {
-    const card = h('div', { class: 'card' }, h('h2', {}, '📈 Kraftentwicklung (geschätztes 1RM)'));
+    const card = h('div', { class: 'card' }, h('h2', {}, '📈 ' + tr('Entwicklung je Übung', 'Progress per exercise')));
     for (const p of progs) {
       card.appendChild(h('div', { class: 'chart-block' },
         h('div', { class: 'chart-head' },
           h('span', {}, p.name),
-          h('span', { class: p.prog.changeAbs >= 0 ? 'delta up' : 'delta down' },
-            (p.prog.changeAbs >= 0 ? '+' : '') + p.prog.changeAbs + ' kg · ' + p.prog.slopePerWeek + ' kg/Wo.'),
+          h('span', { class: p.deltaAbs >= 0 ? 'delta up' : 'delta down' },
+            (p.deltaAbs >= 0 ? '+' : '') + p.deltaAbs + ' ' + p.unit + (p.bodyweight ? '' : ' · ' + p.slope + ' kg/' + tr('Wo.', 'wk'))),
         ),
-        lineChart(p.prog.series, { color: '#4ade80' }),
+        lineChart(p.series, { color: '#4ade80', zeroBased: p.zero }),
       ));
     }
     wrap.appendChild(card);
