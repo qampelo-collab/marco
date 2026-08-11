@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v53';
+const APP_VERSION = 'v54';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -633,6 +633,7 @@ async function renderTraining() {
       const target = parseTargetSets(it.scheme);
       const complete = target && done >= target;
       planCard.appendChild(h('div', { class: 'row-item', onclick: () => {
+        addDetails.open = true;                 // Erfassungs-Formular aufklappen
         exSel.value = it.exerciseId;
         prefillFromLast(true);
         weightInp.focus();
@@ -817,11 +818,14 @@ async function renderTraining() {
   }
   wrap.appendChild(listCard);
 
-  // „Satz hinzufügen" ist beim Öffnen einer Einheit zweitrangig → eingeklappt.
-  wrap.appendChild(h('details', { class: 'manual-details' },
+  // „Satz hinzufügen": bei neuer (leerer) Einheit offen zum sofortigen Loslegen,
+  // bei einer Einheit mit Sätzen eingeklappt (Fokus auf Ansehen/Korrigieren).
+  const addDetails = h('details', { class: 'manual-details' },
     h('summary', {}, tr('➕ Satz hinzufügen / aus Foto', '➕ Add a set / from photo')),
     form,
-  ));
+  );
+  if (sets.length === 0) addDetails.open = true;
+  wrap.appendChild(addDetails);
   return wrap;
 
   // Baut eine Satz-Zeile mit Anzeige- und Bearbeiten-Modus.
