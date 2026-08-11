@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v44';
+const APP_VERSION = 'v45';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -986,11 +986,31 @@ async function renderExercises() {
   return wrap;
 }
 
+// Wiederholungs-Progression für Körpergewichts-Übungen: bestes (= höchste
+// Wiederholungszahl) je Tag als Zeitreihe.
+function repsProgression(sets) {
+  const byDay = new Map();
+  for (const s of sets) {
+    if (!(s.reps > 0) || !s.date) continue;
+    if (!byDay.has(s.date) || s.reps > byDay.get(s.date)) byDay.set(s.date, s.reps);
+  }
+  const series = [...byDay.entries()].map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date));
+  const first = series.length ? series[0].value : 0;
+  const current = series.length ? series[series.length - 1].value : 0;
+  const best = series.length ? Math.max(...series.map((p) => p.value)) : 0;
+  return { series, first, current, best, sessions: series.length, changeAbs: round1(current - first) };
+}
+
 async function renderExerciseDetail(id) {
   const ex = await db.get('exercises', id);
   const { enriched, exercises, workouts } = await loadEnrichedSets();
   const sets = enriched.filter((s) => s.exerciseId === id);
   const prog = progression(sets, FORMULA);
+  // Körpergewichts-Übung (alle Sätze 0 kg, z.B. Klimmzüge) → wiederholungs-
+  // basiert auswerten statt über 1RM.
+  const maxW = sets.reduce((m, s) => Math.max(m, s.weight || 0), 0);
+  const bodyweight = sets.length > 0 && maxW === 0;
+  const repsProg = bodyweight ? repsProgression(sets) : null;
 
   const wrap = h('div', { class: 'view' });
   wrap.appendChild(h('a', { class: 'back', href: '#uebungen' }, '‹ Zurück zu Übungen'));
@@ -1102,23 +1122,23 @@ async function renderExerciseDetail(id) {
 
   // --- Coach-Hinweis zu DIESER Übung (oben, nur wenn relevant) ---
   if (prog.sessions >= 4) {
-    const series = prog.series;
+    const series = bodyweight ? repsProg.series : prog.series;
     const half = Math.floor(series.length / 2);
     const earlierBest = Math.max(...series.slice(0, half).map((p) => p.value));
     const recentBest = Math.max(...series.slice(half).map((p) => p.value));
+    const unit = bodyweight ? tr('Wdh.', 'reps') : 'kg';
+    const what = bodyweight ? tr('Beste Wiederholungen', 'Best reps') : tr('Bestes 1RM', 'Best 1RM');
     let level, title, text;
-    if (recentBest > earlierBest + 0.5) {
+    if (recentBest > earlierBest + (bodyweight ? 0.5 : 0.5)) {
       level = 'good'; title = tr('Im Aufwärtstrend', 'Trending up');
-      text = tr(`Bestes 1RM von ${earlierBest} auf ${recentBest} kg gestiegen. Weiter so.`,
-        `Best 1RM rose from ${earlierBest} to ${recentBest} kg. Keep it up.`);
+      text = `${what} ${earlierBest} → ${recentBest} ${unit}. ` + tr('Weiter so.', 'Keep it up.');
     } else if (recentBest < earlierBest - 0.5) {
       level = 'warn'; title = tr('Zuletzt schwächer', 'Recently weaker');
-      text = tr(`Bestes 1RM von ${earlierBest} auf ${recentBest} kg gefallen. Erholung/Deload prüfen.`,
-        `Best 1RM dropped from ${earlierBest} to ${recentBest} kg. Check recovery/deload.`);
+      text = `${what} ${earlierBest} → ${recentBest} ${unit}. ` + tr('Erholung/Deload prüfen.', 'Check recovery/deload.');
     } else {
       level = 'tip'; title = tr('Plateau', 'Plateau');
-      text = tr(`Bestes 1RM seit ${prog.sessions} Einheiten bei ~${recentBest} kg. Deload oder Wdh.-Bereich wechseln.`,
-        `Best 1RM stuck around ${recentBest} kg for ${prog.sessions} sessions. Deload or switch rep range.`);
+      text = `${what} ${tr('seit', 'for')} ${prog.sessions} ${tr('Einheiten bei ~', 'sessions around ~')}${recentBest} ${unit}. ` +
+        tr('Deload oder Reiz variieren (z.B. Zusatzgewicht, Tempo).', 'Deload or vary the stimulus (added weight, tempo).');
     }
     wrap.appendChild(h('div', { class: 'card' },
       h('div', { class: 'suggestion ' + level },
@@ -1133,29 +1153,44 @@ async function renderExerciseDetail(id) {
   }
 
   // --- Übersicht (KPIs + Charts) ---
-  wrap.appendChild(h('div', { class: 'kpi-grid' },
-    kpi(prog.current + ' kg', tr('Aktuelles 1RM', 'Current 1RM')),
-    kpi(prog.best + ' kg', tr('Bestes 1RM', 'Best 1RM')),
-    kpi((prog.changePct >= 0 ? '+' : '') + prog.changePct + '%', tr('seit Start', 'since start')),
-    kpi((prog.slopePerWeek >= 0 ? '+' : '') + prog.slopePerWeek, tr('kg/Woche', 'kg/week')),
-  ));
-
-  wrap.appendChild(h('div', { class: 'card' },
-    h('h2', {}, '📈 Geschätztes 1RM'),
-    lineChart(prog.series, { color: '#4ade80' }),
-  ));
-
-  // Volumen-Verlauf
-  const volByDay = new Map();
-  for (const s of sets) {
-    const k = s.date;
-    volByDay.set(k, (volByDay.get(k) || 0) + s.weight * s.reps);
+  if (bodyweight) {
+    wrap.appendChild(h('div', { class: 'kpi-grid' },
+      kpi(repsProg.current + ' ' + tr('Wdh.', 'reps'), tr('Aktuell (max)', 'Current (max)')),
+      kpi(repsProg.best + ' ' + tr('Wdh.', 'reps'), tr('Bestleistung', 'Best')),
+      kpi((repsProg.changeAbs >= 0 ? '+' : '') + repsProg.changeAbs, tr('Wdh. seit Start', 'reps since start')),
+      kpi(String(repsProg.sessions), tr('Einheiten', 'sessions')),
+    ));
+    wrap.appendChild(h('div', { class: 'card' },
+      h('h2', {}, '📈 ' + tr('Wiederholungen (max/Tag)', 'Reps (max/day)')),
+      lineChart(repsProg.series, { color: '#4ade80' }),
+    ));
+    // Gesamt-Wiederholungen je Einheit
+    const repsByDay = new Map();
+    for (const s of sets) { if (s.reps > 0 && s.date) repsByDay.set(s.date, (repsByDay.get(s.date) || 0) + s.reps); }
+    const repSeries = [...repsByDay.entries()].map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date));
+    wrap.appendChild(h('div', { class: 'card' },
+      h('h2', {}, '📊 ' + tr('Wiederholungen je Einheit', 'Reps per session')),
+      lineChart(repSeries, { color: '#60a5fa' }),
+    ));
+  } else {
+    wrap.appendChild(h('div', { class: 'kpi-grid' },
+      kpi(prog.current + ' kg', tr('Aktuelles 1RM', 'Current 1RM')),
+      kpi(prog.best + ' kg', tr('Bestes 1RM', 'Best 1RM')),
+      kpi((prog.changePct >= 0 ? '+' : '') + prog.changePct + '%', tr('seit Start', 'since start')),
+      kpi((prog.slopePerWeek >= 0 ? '+' : '') + prog.slopePerWeek, tr('kg/Woche', 'kg/week')),
+    ));
+    wrap.appendChild(h('div', { class: 'card' },
+      h('h2', {}, '📈 ' + tr('Geschätztes 1RM', 'Estimated 1RM')),
+      lineChart(prog.series, { color: '#4ade80' }),
+    ));
+    const volByDay = new Map();
+    for (const s of sets) { const k = s.date; volByDay.set(k, (volByDay.get(k) || 0) + s.weight * s.reps); }
+    const volSeries = [...volByDay.entries()].map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date));
+    wrap.appendChild(h('div', { class: 'card' },
+      h('h2', {}, '📊 ' + tr('Volumen je Einheit', 'Volume per session')),
+      lineChart(volSeries, { color: '#60a5fa' }),
+    ));
   }
-  const volSeries = [...volByDay.entries()].map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date));
-  wrap.appendChild(h('div', { class: 'card' },
-    h('h2', {}, '📊 Volumen je Einheit'),
-    lineChart(volSeries, { color: '#60a5fa' }),
-  ));
 
   // Historie – nach Trainingstag gruppiert (neueste zuerst), je Tag die Sätze.
   const hist = h('div', { class: 'card' }, h('h2', {}, tr('Historie', 'History')));
@@ -1168,24 +1203,30 @@ async function renderExerciseDetail(id) {
   const days = [...byDay.keys()].sort((a, b) => b.localeCompare(a)).slice(0, 30);
   for (const d of days) {
     const daySets = byDay.get(d).sort((a, b) => (a.ts || 0) - (b.ts || 0));
-    const best = bestE1rm(daySets, FORMULA).value;
+    const dayHead = bodyweight
+      ? `${Math.max(...daySets.map((s) => s.reps || 0))} ${tr('Wdh. max', 'reps max')}`
+      : (() => { const b = bestE1rm(daySets, FORMULA).value; return b ? 'e1RM ' + b + ' kg' : ''; })();
     const group = h('div', { class: 'ex-group' },
       h('div', { class: 'ex-group-head' },
         h('strong', {}, `${weekdayShort(d)}, ${fmtDate(d)}`),
-        h('span', { class: 'muted small' }, `${daySets.length} ${tr('Sätze', 'sets')}${best ? ' · e1RM ' + best + ' kg' : ''}`),
+        h('span', { class: 'muted small' }, `${daySets.length} ${tr('Sätze', 'sets')}${dayHead ? ' · ' + dayHead : ''}`),
       ),
     );
     daySets.forEach((s, i) => {
+      const load = (bodyweight || !(s.weight > 0)) ? `${s.reps} ${tr('Wdh.', 'reps')}` : `${s.weight} kg × ${s.reps}`;
       const line = h('div', { class: 'set-line' },
         h('span', { class: 'set-no' }, `${tr('Satz', 'Set')} ${i + 1}`),
-        h('strong', { class: 'set-load' }, `${s.weight} kg × ${s.reps}`),
+        h('strong', { class: 'set-load' }, load),
       );
       const badge = tendBadge(s.tendency);
       if (badge) line.appendChild(badge);
+      const sub = (bodyweight || !(s.weight > 0))
+        ? (s.rpe ? 'RPE ' + s.rpe : '')
+        : `e1RM ${round1(e1rm(s.weight, s.reps, FORMULA))} kg${s.rpe ? ' · RPE ' + s.rpe : ''}`;
       group.appendChild(h('div', { class: 'set-item' },
         h('div', { class: 'set-main' }, line,
-          h('div', { class: 'muted small' }, `e1RM ${round1(e1rm(s.weight, s.reps, FORMULA))} kg${s.rpe ? ' · RPE ' + s.rpe : ''}`)),
-      ));
+          sub ? h('div', { class: 'muted small' }, sub) : '')),
+      );
     });
     hist.appendChild(group);
   }

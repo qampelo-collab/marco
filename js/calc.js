@@ -78,7 +78,9 @@ export function linreg(points) {
 // sets: alle Sätze einer Übung (mit .weight, .reps und Datum .date)
 // Liefert Zeitreihe des besten e1RM pro Tag + Kennzahlen.
 export function progression(sets, formula = 'epley') {
-  const validSets = sets.filter((s) => s.weight > 0 && s.reps > 0 && s.date);
+  // Gewicht 0 (Körpergewicht, z.B. Klimmzüge) ist gültig – nur Reps & Datum
+  // müssen vorhanden sein.
+  const validSets = sets.filter((s) => s.weight >= 0 && s.reps > 0 && s.date);
   if (validSets.length === 0) {
     return { series: [], best: 0, current: 0, first: 0,
              changeAbs: 0, changePct: 0, slopePerWeek: 0, sessions: 0 };
