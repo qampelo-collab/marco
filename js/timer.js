@@ -31,6 +31,16 @@ function beep() {
 }
 
 let el = null, iv = null, endAt = 0, total = 0, finished = false, hideTimer = null;
+let doneCb = null, advanced = false;
+
+// Callback, das nach der Pause (Timer abgelaufen ODER „Fertig") ausgelöst wird –
+// z.B. um in der App direkt zum nächsten Satz zu springen. „✕" löst es NICHT aus.
+export function setRestDoneCallback(fn) { doneCb = typeof fn === 'function' ? fn : null; }
+function fireDone() {
+  if (advanced) return;
+  advanced = true;
+  if (doneCb) { try { doneCb(); } catch (e) { /* ignore */ } }
+}
 
 function fmt(sec) {
   sec = Math.max(0, sec);
@@ -52,8 +62,8 @@ function build() {
       `<button class="rt-skip">${t('Fertig', 'Done')}</button>` +
     `</div>`;
   document.body.appendChild(el);
-  el.querySelector('.rt-x').onclick = stopRest;
-  el.querySelector('.rt-skip').onclick = stopRest;
+  el.querySelector('.rt-x').onclick = stopRest;                        // Abbrechen: kein Weiter
+  el.querySelector('.rt-skip').onclick = () => { fireDone(); stopRest(); }; // „Fertig": weiter zum nächsten Satz
   el.querySelector('.rt-m15').onclick = () => { endAt -= 15000; if (endAt < Date.now()) endAt = Date.now(); tick(); };
   el.querySelector('.rt-p15').onclick = () => { endAt += 15000; finished = false; el.classList.remove('done'); if (!iv) iv = setInterval(tick, 200); tick(); };
 }
@@ -75,6 +85,7 @@ function tick() {
     render(0);
     beep();
     if (navigator.vibrate) { try { navigator.vibrate([250, 120, 250]); } catch (e) {} }
+    fireDone();                                   // Timer durch → nächster Satz
     hideTimer = setTimeout(stopRest, 10000);
   }
 }
@@ -84,7 +95,7 @@ export function startRest(seconds) {
   unlockAudio();
   clearInterval(iv); iv = null;
   clearTimeout(hideTimer); hideTimer = null;
-  total = seconds; endAt = Date.now() + seconds * 1000; finished = false;
+  total = seconds; endAt = Date.now() + seconds * 1000; finished = false; advanced = false;
   build();
   el.classList.remove('done');
   iv = setInterval(tick, 200);

@@ -8,7 +8,7 @@ import { extractSetsFromImage, VISION_MODELS, DEFAULT_VISION_MODEL } from './vis
 import { PLAN, installPlan, parseTargetSets } from './plan.js';
 import { applyTheme, ACCENTS, DEFAULT_ACCENT, DEFAULT_THEME } from './theme.js';
 import { applyI18n, getLang, setLang, detectLang, L } from './i18n.js';
-import { startRest, unlockAudio } from './timer.js';
+import { startRest, unlockAudio, setRestDoneCallback } from './timer.js';
 import { forecastValue, weeksToTarget, milestoneProgress, nextMilestone } from './forecast.js';
 import { parseRestSeconds } from './calc.js';
 
@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v55';
+const APP_VERSION = 'v56';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -411,6 +411,7 @@ function kpi(value, label) {
 //  TRAINING ERFASSEN
 // ==================================================================
 async function renderTraining() {
+  setRestDoneCallback(null);   // wird in einer offenen Einheit unten gesetzt
   const { enriched, workouts: allWorkouts, exercises } = await loadEnrichedSets();
   const workouts = [...allWorkouts].sort((a, b) => b.date.localeCompare(a.date));
 
@@ -810,6 +811,24 @@ async function renderTraining() {
     h('button', { class: 'btn ghost big-pause', onclick: () => startRest(restSecondsFor(parseInt(exSel.value, 10))) },
       '⏱ Pause starten'),
   );
+
+  // Nächste fällige Übung im Plan bestimmen (erste, deren Zielsätze noch nicht
+  // voll sind); ohne Plan die zuletzt benutzte Übung fortsetzen.
+  function nextUpExerciseId() {
+    if (current.plan && current.plan.length) {
+      const countByEx = {};
+      for (const s of sets) countByEx[s.exerciseId] = (countByEx[s.exerciseId] || 0) + 1;
+      for (const it of current.plan) {
+        const target = parseTargetSets(it.scheme) || 0;
+        if (!target || (countByEx[it.exerciseId] || 0) < target) return it.exerciseId;
+      }
+      return current.plan[current.plan.length - 1].exerciseId; // alles voll → letzte
+    }
+    const last = [...sets].sort((a, b) => (b.ts || 0) - (a.ts || 0))[0];
+    return last ? last.exerciseId : null;
+  }
+  const nextEx = nextUpExerciseId();
+  if (nextEx != null && exercises.some((e) => e.id === nextEx)) exSel.value = nextEx;
   prefillFromLast(false);
 
   // Liste der Sätze dieser Einheit — nach Übung gruppiert (wie auf deinen
@@ -847,8 +866,16 @@ async function renderTraining() {
     h('summary', {}, tr('➕ Satz hinzufügen / aus Foto', '➕ Add a set / from photo')),
     form,
   );
-  if (sets.length === 0) addDetails.open = true;
+  // Bei leerer Einheit oder aktivem Plan das Formular offen halten (Log-Modus).
+  if (sets.length === 0 || (current.plan && current.plan.length)) addDetails.open = true;
   wrap.appendChild(addDetails);
+
+  // Nach der Pause (Timer durch oder „Fertig") direkt zum nächsten Satz:
+  // Formular aufklappen und Gewichtsfeld fokussieren (Übung ist schon gewählt).
+  setRestDoneCallback(() => {
+    addDetails.open = true;
+    try { weightInp.focus(); weightInp.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { /* ignore */ }
+  });
   return wrap;
 
   // Baut eine Satz-Zeile mit Anzeige- und Bearbeiten-Modus.
