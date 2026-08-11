@@ -2,6 +2,7 @@
 import { db, seedIfEmpty } from './db.js';
 import { installPlanIfNeeded } from './plan.js';
 import { initUI } from './ui.js';
+import { resumeRestTimer } from './timer.js';
 
 // Persistenten Speicher anfordern: verhindert, dass iOS/der Browser die lokale
 // Datenbank „verdrängt" (die Hauptursache für plötzlich fehlende Daten).
@@ -24,6 +25,7 @@ async function main() {
   await seedIfEmpty();
   await installPlanIfNeeded(db);
   await initUI();
+  resumeRestTimer();   // eine zuvor laufende Pause fortsetzen, falls vorhanden
 
   // Service Worker für Offline-Betrieb + Installierbarkeit registrieren.
   // Wichtig: bei einer neuen Version lädt die App automatisch neu, damit man

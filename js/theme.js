@@ -13,14 +13,17 @@ export const ACCENTS = {
 
 export const DEFAULT_ACCENT = 'gruen';
 export const DEFAULT_THEME = 'dark';
+export const THEME_MODES = ['dark', 'light', 'retro'];
+
+const THEME_COLORS = { dark: '#0f172a', light: '#f4f6fb', retro: '#1a0b2e' };
 
 // Theme + Akzent auf das Dokument anwenden (live).
 export function applyTheme(theme, accentKey) {
   const root = document.documentElement;
-  root.dataset.theme = theme === 'light' ? 'light' : 'dark';
+  root.dataset.theme = THEME_MODES.includes(theme) ? theme : 'dark';
   const a = ACCENTS[accentKey] || ACCENTS[DEFAULT_ACCENT];
   root.style.setProperty('--primary', a.primary);
   root.style.setProperty('--primary-ink', a.ink);
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = theme === 'light' ? '#f4f6fb' : '#0f172a';
+  if (meta) meta.content = THEME_COLORS[root.dataset.theme] || THEME_COLORS.dark;
 }

@@ -6,7 +6,7 @@ import { buildSuggestions } from './coach.js';
 import { lineChart, barChart } from './charts.js';
 import { extractSetsFromImage, VISION_MODELS, DEFAULT_VISION_MODEL } from './vision.js';
 import { PLAN, installPlan, parseTargetSets } from './plan.js';
-import { applyTheme, ACCENTS, DEFAULT_ACCENT, DEFAULT_THEME } from './theme.js';
+import { applyTheme, ACCENTS, DEFAULT_ACCENT, DEFAULT_THEME, THEME_MODES } from './theme.js';
 import { applyI18n, getLang, setLang, detectLang, L } from './i18n.js';
 import { startRest, unlockAudio, setRestDoneCallback } from './timer.js';
 import { forecastValue, weeksToTarget, milestoneProgress, nextMilestone } from './forecast.js';
@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v58';
+const APP_VERSION = 'v59';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -38,8 +38,13 @@ function h(tag, attrs = {}, ...children) {
   return el;
 }
 function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+// Bestehenden Wert bei Fokus markieren: ein Tipp aufs Feld zeigt den aktuellen
+// Stand und das nächste Tippen ersetzt ihn direkt, ohne ihn erst löschen zu müssen.
+function selectOnFocus(input) { input.addEventListener('focus', () => input.select()); return input; }
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 function fmtDate(s) { return s ? s.slice(8, 10) + '.' + s.slice(5, 7) + '.' + s.slice(0, 4) : ''; }
+// Sekunden als Chip-Beschriftung: "30s", "1:30".
+function fmtSec(sec) { return sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; }
 
 const MONTHS_DE = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
 const MONTHS_EN = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -149,6 +154,19 @@ export async function initUI() {
       else location.hash = target;              // sonst per hashchange neu rendern
     });
   });
+
+  // Bottom-Nav ausblenden, solange die (iOS-)Bildschirmtastatur eingeblendet
+  // ist (z.B. bei Zahlenfeldern) – sie würde sonst mitten ins Bild rutschen.
+  const bottomnav = document.querySelector('.bottomnav');
+  if (bottomnav && window.visualViewport) {
+    const vv = window.visualViewport;
+    const onVVResize = () => {
+      const keyboardOpen = (window.innerHeight - vv.height) > 140;
+      bottomnav.style.display = keyboardOpen ? 'none' : '';
+    };
+    vv.addEventListener('resize', onVVResize);
+    vv.addEventListener('scroll', onVVResize);
+  }
 
   route();
 }
@@ -535,12 +553,34 @@ async function renderTraining() {
       qDateBox,
     ));
 
+    // ============ Freier Timer (ohne Übungsbezug) ============
+    const ftCustom = h('input', { type: 'number', step: '5', min: '5', inputmode: 'numeric', class: 'inp',
+      value: defaultRest, placeholder: tr('Sekunden', 'seconds') });
+    const ftChip = (sec) => h('button', { class: 'btn ghost small', onclick: () => startFreeTimer(sec) }, fmtSec(sec));
+    function startFreeTimer(sec) {
+      if (!(sec > 0)) return;
+      startRest(sec, { readyText: tr('🔔 Timer fertig!', '🔔 Timer done!') });
+    }
+    wrap.appendChild(h('div', { class: 'card' },
+      h('h2', {}, tr('⏱ Freier Timer', '⏱ Free timer')),
+      h('p', { class: 'muted small' }, tr('Einfach eine Pause stoppen, ganz ohne Training zu erfassen.', 'Just time a break, without logging any training.')),
+      h('div', { class: 'seg', style: 'flex-wrap:wrap' }, ftChip(30), ftChip(60), ftChip(90), ftChip(120), ftChip(180)),
+      h('div', { class: 'field-row', style: 'margin-top:10px' },
+        h('label', { class: 'field' }, h('span', {}, tr('Eigene Dauer (Sek.)', 'Custom duration (sec)')), ftCustom),
+        h('button', { class: 'btn primary', style: 'align-self:flex-end', onclick: () => startFreeTimer(parseInt(ftCustom.value, 10)) },
+          tr('▶ Start', '▶ Start')),
+      ),
+    ));
+
     // ============ AUSNAHME: manuell erfassen (eingeklappt) ============
     const mDate = h('input', { type: 'date', value: todayStr(), class: 'inp' });
     const mEx = h('select', { class: 'inp' },
       ...exercises.map((e) => h('option', { value: e.id }, `${e.name} (${CAT_LABEL[e.category] || e.category})`)));
-    const mWeight = h('input', { type: 'number', step: '0.5', inputmode: 'decimal', class: 'inp', placeholder: tr('kg (0 = Körpergewicht)', 'kg (0 = bodyweight)') });
-    const mReps = h('input', { type: 'number', step: '1', inputmode: 'numeric', class: 'inp', placeholder: tr('Wdh.', 'Reps') });
+    // type="text" statt "number": nur so unterstützen Browser das Markieren
+    // des bestehenden Werts bei Fokus (inputmode sorgt weiterhin für die
+    // numerische Bildschirmtastatur).
+    const mWeight = selectOnFocus(h('input', { type: 'text', inputmode: 'decimal', class: 'inp', placeholder: tr('kg (0 = Körpergewicht)', 'kg (0 = bodyweight)') }));
+    const mReps = selectOnFocus(h('input', { type: 'text', inputmode: 'numeric', class: 'inp', placeholder: tr('Wdh.', 'Reps') }));
     const mTend = tendencyPicker(null);
     const mStartDate = h('input', { type: 'date', value: todayStr(), class: 'inp' });
     const templates = [...await db.all('templates')];
@@ -561,7 +601,9 @@ async function renderTraining() {
         const wid = await db.add('workouts', { date: mDate.value || todayStr(), notes: '' });
         await db.add('sets', { workoutId: wid, exerciseId: parseInt(mEx.value, 10), weight: w, reps: r, rpe: null, tendency: mTend.get(), photo: null, ts: Date.now() });
         toast(tr('Gespeichert ✓ – nächstes', 'Saved ✓ — next'));
-        mWeight.value = ''; mReps.value = ''; mTend.set(null); mWeight.focus();
+        // Werte NICHT leeren: nächster Satz hat oft dasselbe Gewicht/Wdh. –
+        // einfach antippen (markiert automatisch) und bei Bedarf überschreiben.
+        mTend.set(null); mReps.focus(); mReps.select();
       } }, tr('Speichern & nächstes', 'Save & next')),
     ];
 
@@ -695,8 +737,8 @@ async function renderTraining() {
   // Eingabemaske Satz
   const exSel = h('select', { class: 'inp' },
     ...exercises.map((e) => h('option', { value: e.id }, `${e.name} (${CAT_LABEL[e.category] || e.category})`)));
-  const weightInp = h('input', { type: 'number', step: '0.5', inputmode: 'decimal', class: 'inp', placeholder: tr('kg (0 = Körpergewicht)', 'kg (0 = bodyweight)') });
-  const repsInp = h('input', { type: 'number', step: '1', inputmode: 'numeric', class: 'inp', placeholder: 'Wdh.' });
+  const weightInp = selectOnFocus(h('input', { type: 'text', inputmode: 'decimal', class: 'inp', placeholder: tr('kg (0 = Körpergewicht)', 'kg (0 = bodyweight)') }));
+  const repsInp = selectOnFocus(h('input', { type: 'text', inputmode: 'numeric', class: 'inp', placeholder: 'Wdh.' }));
   const photoInp = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'inp-file' });
   const preview = h('div', { class: 'photo-preview' });
   let photoData = null;
@@ -923,9 +965,9 @@ async function renderTraining() {
       const exE = h('select', { class: 'inp' },
         ...exercises.map((e) => h('option', { value: e.id }, `${e.name} (${CAT_LABEL[e.category] || e.category})`)));
       exE.value = s.exerciseId;
-      const wE = h('input', { type: 'number', step: '0.5', inputmode: 'decimal', class: 'inp', value: s.weight,
-        placeholder: tr('kg (0 = Körpergewicht)', 'kg (0 = bodyweight)') });
-      const rE = h('input', { type: 'number', step: '1', inputmode: 'numeric', class: 'inp', value: s.reps, placeholder: tr('Wdh.', 'Reps') });
+      const wE = selectOnFocus(h('input', { type: 'text', inputmode: 'decimal', class: 'inp', value: s.weight,
+        placeholder: tr('kg (0 = Körpergewicht)', 'kg (0 = bodyweight)') }));
+      const rE = selectOnFocus(h('input', { type: 'text', inputmode: 'numeric', class: 'inp', value: s.reps, placeholder: tr('Wdh.', 'Reps') }));
       const tend = tendencyPicker(s.tendency);
       row.appendChild(h('div', { class: 'set-main', style: 'width:100%' },
         exE,
@@ -1959,10 +2001,13 @@ async function renderSettings() {
   // Aussehen: Theme + Akzentfarbe
   const curTheme = await db.getMeta('theme', DEFAULT_THEME);
   const curAccent = await db.getMeta('accent', DEFAULT_ACCENT);
-  const darkBtn = h('button', { class: 'btn ghost' + (curTheme !== 'light' ? ' on' : '') }, '🌙 Dunkel');
+  const darkBtn = h('button', { class: 'btn ghost' + (curTheme === 'dark' ? ' on' : '') }, '🌙 Dunkel');
   const lightBtn = h('button', { class: 'btn ghost' + (curTheme === 'light' ? ' on' : '') }, '☀️ Hell');
-  darkBtn.onclick = async () => { await db.setMeta('theme', 'dark'); applyTheme('dark', await db.getMeta('accent', DEFAULT_ACCENT)); route(); };
-  lightBtn.onclick = async () => { await db.setMeta('theme', 'light'); applyTheme('light', await db.getMeta('accent', DEFAULT_ACCENT)); route(); };
+  const retroBtn = h('button', { class: 'btn ghost' + (curTheme === 'retro' ? ' on' : '') }, tr('🕹️ Retro', '🕹️ Retro'));
+  const setMode = async (mode) => { await db.setMeta('theme', mode); applyTheme(mode, await db.getMeta('accent', DEFAULT_ACCENT)); route(); };
+  darkBtn.onclick = () => setMode('dark');
+  lightBtn.onclick = () => setMode('light');
+  retroBtn.onclick = () => setMode('retro');
   const swatches = h('div', { class: 'swatches' });
   for (const [key, a] of Object.entries(ACCENTS)) {
     swatches.appendChild(h('button', {
@@ -1981,7 +2026,7 @@ async function renderSettings() {
   wrap.appendChild(h('div', { class: 'card' },
     h('h2', {}, '🎨 Aussehen'),
     h('label', { class: 'field' }, h('span', {}, 'Sprache'), h('div', { class: 'seg' }, deBtn, enBtn)),
-    h('label', { class: 'field' }, h('span', {}, 'Modus'), h('div', { class: 'seg' }, darkBtn, lightBtn)),
+    h('label', { class: 'field' }, h('span', {}, 'Modus'), h('div', { class: 'seg' }, darkBtn, lightBtn, retroBtn)),
     h('label', { class: 'field' }, h('span', {}, 'Akzentfarbe'), swatches),
   ));
 
