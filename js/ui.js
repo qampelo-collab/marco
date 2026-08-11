@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v52';
+const APP_VERSION = 'v53';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -351,19 +351,39 @@ async function renderDashboard() {
     wrap.appendChild(card);
   }
 
-  // Rekorde (bestes geschätztes 1RM je Übung)
-  const records = [...byExercise.entries()]
+  // Rekorde: gewichtsbasiert (bestes 1RM) + Körpergewicht (meiste Wdh./Einheit)
+  const weightedRecords = [...byExercise.entries()]
     .map(([id, sets]) => ({ name: sets[0].exerciseName, ...bestE1rm(sets, FORMULA) }))
     .filter((r) => r.value > 0)
     .sort((a, b) => b.value - a.value)
     .slice(0, 6);
-  if (records.length) {
-    const card = h('div', { class: 'card' }, h('h2', {}, '🏆 Rekorde (bestes 1RM)'));
-    for (const r of records) {
+  const bwRecords = [...byExercise.entries()]
+    .map(([id, sets]) => {
+      const bodyweight = sets.every((s) => !(s.weight > 0)) && sets.some((s) => s.reps > 0);
+      if (!bodyweight) return null;
+      const rp = repsProgression(sets);
+      let bestSet = null;
+      for (const s of sets) { if (s.reps > 0 && (!bestSet || s.reps > bestSet.reps)) bestSet = s; }
+      return { name: sets[0].exerciseName, totalBest: rp.best, bestSet };
+    })
+    .filter((r) => r && r.totalBest > 0)
+    .sort((a, b) => b.totalBest - a.totalBest)
+    .slice(0, 6);
+
+  if (weightedRecords.length || bwRecords.length) {
+    const card = h('div', { class: 'card' }, h('h2', {}, '🏆 ' + tr('Rekorde', 'Records')));
+    for (const r of weightedRecords) {
       card.appendChild(h('div', { class: 'row-item static' },
         h('div', {}, h('strong', {}, r.name),
           r.set ? h('div', { class: 'muted small' }, `${r.set.weight} kg × ${r.set.reps} · ${fmtDate(r.set.date)}`) : null),
         h('span', { class: 'record-val' }, r.value + ' kg'),
+      ));
+    }
+    for (const r of bwRecords) {
+      card.appendChild(h('div', { class: 'row-item static' },
+        h('div', {}, h('strong', {}, r.name),
+          r.bestSet ? h('div', { class: 'muted small' }, `${tr('bester Satz', 'best set')} ${r.bestSet.reps} ${tr('Wdh.', 'reps')} · ${fmtDate(r.bestSet.date)}`) : null),
+        h('span', { class: 'record-val' }, r.totalBest + ' ' + tr('Wdh.', 'reps')),
       ));
     }
     wrap.appendChild(card);
