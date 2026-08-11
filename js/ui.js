@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v45';
+const APP_VERSION = 'v46';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -51,6 +51,22 @@ function monthLabel(ym) {
   const names = getLang() === 'en' ? MONTHS_EN : MONTHS_DE;
   return `${names[parseInt(m, 10) - 1]} ${y}`;
 }
+// Übungsnamen für den Abgleich vereinheitlichen: Groß/Klein, Umlaute und
+// Sonderzeichen ignorieren – verhindert Dubletten wie „Klimmzug"/„Klimmzüge".
+function normExName(s) {
+  return (s || '').toLowerCase()
+    .replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]/g, '');
+}
+// Findet die passende Übung zu einem (evtl. abweichend geschriebenen) Namen.
+function matchExerciseByName(exercises, name) {
+  const n = normExName(name);
+  if (!n) return null;
+  let ex = exercises.find((e) => normExName(e.name) === n)
+    || exercises.find((e) => { const en = normExName(e.name); return en && (en.includes(n) || n.includes(en)); });
+  return ex ? ex.id : null;
+}
+
 // Trainingsnamen fürs Gruppieren vereinheitlichen: Groß/Klein, Trenner
 // (| / - +), Wortreihenfolge und einfacher Plural werden ignoriert.
 // „CORE | LEG", „Legs / Core", „Legs | Core" ergeben denselben Schlüssel.
@@ -340,13 +356,7 @@ async function renderTraining() {
     let qPhoto = null;
     let qRecognized = [];
     let qRecName = null;
-    const qMatch = (name) => {
-      if (!name) return null;
-      const low = name.toLowerCase();
-      let ex = exercises.find((e) => e.name.toLowerCase() === low)
-        || exercises.find((e) => e.name.toLowerCase().includes(low) || low.includes(e.name.toLowerCase()));
-      return ex ? ex.id : null;
-    };
+    const qMatch = (name) => matchExerciseByName(exercises, name);
     // Ganze erkannte Einheit auf einmal speichern (fehlende Übungen werden angelegt).
     async function saveWholeSession() {
       if (!qRecognized.length) return;
@@ -592,13 +602,7 @@ async function renderTraining() {
 
   // --- KI: Werte aus Foto lesen ---
   const aiResult = h('div', { class: 'hint' }, '');
-  const matchExercise = (name) => {
-    if (!name) return null;
-    const low = name.toLowerCase();
-    let ex = exercises.find((e) => e.name.toLowerCase() === low);
-    if (!ex) ex = exercises.find((e) => e.name.toLowerCase().includes(low) || low.includes(e.name.toLowerCase()));
-    return ex ? ex.id : null;
-  };
+  const matchExercise = (name) => matchExerciseByName(exercises, name);
   const aiBtn = h('button', { class: 'btn ghost', onclick: async () => {
     if (!apiKey) { aiResult.textContent = 'Kein API-Schlüssel – unter „Mehr" hinterlegen.'; return; }
     if (!photoData) { aiResult.textContent = 'Bitte zuerst ein Foto aufnehmen/auswählen.'; return; }
@@ -1146,14 +1150,23 @@ async function renderExerciseDetail(id) {
         h('div', { class: 'sug-text' }, text))));
   }
 
-  if (prog.sessions === 0) {
+  // Wirklich keine Sätze → nur Bearbeiten anbieten.
+  if (sets.length === 0) {
     wrap.appendChild(h('div', { class: 'card' }, h('p', { class: 'muted' }, tr('Noch keine Sätze für diese Übung erfasst.', 'No sets logged for this exercise yet.'))));
     if (editDetails) wrap.appendChild(editDetails);
     return wrap;
   }
 
-  // --- Übersicht (KPIs + Charts) ---
-  if (bodyweight) {
+  // Sätze vorhanden, aber ohne auswertbare Wiederholungen (z.B. Wdh. = 0):
+  // trotzdem die Historie zeigen, damit man korrigieren kann.
+  if (prog.sessions === 0) {
+    wrap.appendChild(h('div', { class: 'card' }, h('p', { class: 'muted' },
+      tr('Für die Auswertung fehlen Wiederholungen (Wdh. = 0). Prüfe die Sätze unten und trage die Wiederholungen nach – dann erscheinen hier Verlauf und Kennzahlen.',
+        'Reps are missing for the analysis (reps = 0). Check the sets below and add the reps — then charts and stats appear here.'))));
+  }
+
+  // --- Übersicht (KPIs + Charts) — nur mit auswertbaren Werten ---
+  if (prog.sessions > 0 && bodyweight) {
     wrap.appendChild(h('div', { class: 'kpi-grid' },
       kpi(repsProg.current + ' ' + tr('Wdh.', 'reps'), tr('Aktuell (max)', 'Current (max)')),
       kpi(repsProg.best + ' ' + tr('Wdh.', 'reps'), tr('Bestleistung', 'Best')),
@@ -1172,7 +1185,7 @@ async function renderExerciseDetail(id) {
       h('h2', {}, '📊 ' + tr('Wiederholungen je Einheit', 'Reps per session')),
       lineChart(repSeries, { color: '#60a5fa' }),
     ));
-  } else {
+  } else if (prog.sessions > 0) {
     wrap.appendChild(h('div', { class: 'kpi-grid' },
       kpi(prog.current + ' kg', tr('Aktuelles 1RM', 'Current 1RM')),
       kpi(prog.best + ' kg', tr('Bestes 1RM', 'Best 1RM')),
