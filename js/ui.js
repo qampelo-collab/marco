@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v50';
+const APP_VERSION = 'v51';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -1247,7 +1247,7 @@ async function renderExerciseDetail(id) {
     ));
     wrap.appendChild(h('div', { class: 'card' },
       h('h2', {}, '📈 ' + tr('Wiederholungen gesamt / Einheit', 'Total reps / session')),
-      lineChart(repsProg.series, { color: '#4ade80' }),
+      lineChart(repsProg.series, { color: '#4ade80', zeroBased: true }),
     ));
     // Zusatz: bester Einzelsatz je Einheit
     const maxByDay = new Map();
@@ -1255,7 +1255,7 @@ async function renderExerciseDetail(id) {
     const maxSeries = [...maxByDay.entries()].map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date));
     wrap.appendChild(h('div', { class: 'card' },
       h('h2', {}, '📊 ' + tr('Bester Satz (Wdh.)', 'Best set (reps)')),
-      lineChart(maxSeries, { color: '#60a5fa' }),
+      lineChart(maxSeries, { color: '#60a5fa', zeroBased: true }),
     ));
   } else if (prog.sessions > 0) {
     wrap.appendChild(h('div', { class: 'kpi-grid' },
@@ -1273,7 +1273,7 @@ async function renderExerciseDetail(id) {
     const volSeries = [...volByDay.entries()].map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date));
     wrap.appendChild(h('div', { class: 'card' },
       h('h2', {}, '📊 ' + tr('Volumen je Einheit', 'Volume per session')),
-      lineChart(volSeries, { color: '#60a5fa' }),
+      lineChart(volSeries, { color: '#60a5fa', zeroBased: true }),
     ));
   }
 

@@ -7,7 +7,7 @@ function ns(tag, attrs = {}) {
 }
 
 // Liniendiagramm für Zeitreihen: data = [{date:'YYYY-MM-DD', value:Number}]
-export function lineChart(data, { width = 320, height = 160, color = '#4ade80', unit = '' } = {}) {
+export function lineChart(data, { width = 320, height = 160, color = '#4ade80', unit = '', zeroBased = false } = {}) {
   const svg = ns('svg', {
     viewBox: `0 0 ${width} ${height}`, width: '100%', height: 'auto',
     class: 'chart', preserveAspectRatio: 'xMidYMid meet',
@@ -25,6 +25,7 @@ export function lineChart(data, { width = 320, height = 160, color = '#4ade80', 
 
   const values = data.map((d) => d.value);
   let min = Math.min(...values), max = Math.max(...values);
+  if (zeroBased) min = 0;              // Achse bei 0 beginnen (z.B. Volumen)
   if (min === max) { min -= 1; max += 1; }
   const range = max - min;
 
