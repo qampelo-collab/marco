@@ -3,7 +3,24 @@ import { db, seedIfEmpty } from './db.js';
 import { installPlanIfNeeded } from './plan.js';
 import { initUI } from './ui.js';
 
+// Persistenten Speicher anfordern: verhindert, dass iOS/der Browser die lokale
+// Datenbank „verdrängt" (die Hauptursache für plötzlich fehlende Daten).
+async function requestPersist() {
+  if (!(navigator.storage && navigator.storage.persist)) return false;
+  try {
+    if (await navigator.storage.persisted()) return true;
+    return await navigator.storage.persist();
+  } catch (e) { return false; }
+}
+
 async function main() {
+  // Früh anfragen; falls (noch) nicht gewährt, bei der ersten Nutzer-Geste erneut.
+  const granted = await requestPersist();
+  if (!granted) {
+    const onGesture = async () => { if (await requestPersist()) window.removeEventListener('pointerdown', onGesture); };
+    window.addEventListener('pointerdown', onGesture);
+  }
+
   await seedIfEmpty();
   await installPlanIfNeeded(db);
   await initUI();

@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v57';
+const APP_VERSION = 'v58';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -2053,6 +2053,24 @@ async function renderSettings() {
       toast(L('KI-Einstellungen gespeichert.'));
     } }, 'Speichern'),
     h('p', { class: 'muted small' }, 'Schlüssel erstellen unter console.anthropic.com. Ohne Schlüssel bleibt die App voll nutzbar (manuelle Eingabe).'),
+  ));
+
+  // Speicherschutz (persistenter Speicher gegen Verdrängung durch iOS)
+  let persisted = false;
+  try { persisted = !!(navigator.storage && navigator.storage.persisted && await navigator.storage.persisted()); } catch (e) { /* ignore */ }
+  wrap.appendChild(h('div', { class: 'card' },
+    h('h2', {}, tr('🔒 Speicherschutz', '🔒 Storage protection')),
+    h('p', { class: 'muted small' }, persisted
+      ? tr('Aktiv – das System darf deine lokalen Daten nicht mehr einfach löschen.', 'Active — the system may no longer evict your local data.')
+      : tr('Noch nicht aktiv. Fordert an, dass iOS deine Daten nicht verdrängt (Hauptursache für plötzlichen Datenverlust). Tipp: Die App zum Home-Bildschirm hinzufügen erhöht die Chance.',
+           'Not active yet. Requests that the OS keeps your data (main cause of sudden data loss). Tip: adding the app to the home screen improves the chance.')),
+    persisted ? h('p', { class: 'muted small' }, '✓') : h('button', { class: 'btn primary', onclick: async () => {
+      let ok = false;
+      try { ok = !!(navigator.storage && navigator.storage.persist && await navigator.storage.persist()); } catch (e) { /* ignore */ }
+      toast(ok ? tr('Speicherschutz aktiv ✓', 'Storage protection active ✓')
+               : tr('Konnte nicht aktiviert werden. App zum Home-Bildschirm hinzufügen und erneut versuchen.', 'Could not enable. Add to home screen and try again.'));
+      route();
+    } }, tr('🔒 Speicher schützen', '🔒 Protect storage')),
   ));
 
   // Backup
