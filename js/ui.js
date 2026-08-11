@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v43';
+const APP_VERSION = 'v44';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -51,6 +51,15 @@ function monthLabel(ym) {
   const names = getLang() === 'en' ? MONTHS_EN : MONTHS_DE;
   return `${names[parseInt(m, 10) - 1]} ${y}`;
 }
+// Trainingsnamen fürs Gruppieren vereinheitlichen: Groß/Klein, Trenner
+// (| / - +), Wortreihenfolge und einfacher Plural werden ignoriert.
+// „CORE | LEG", „Legs / Core", „Legs | Core" ergeben denselben Schlüssel.
+function sessionKey(name) {
+  const tokens = (name || '').toLowerCase().match(/[a-zà-ÿ0-9]+/g);
+  if (!tokens) return '';
+  return tokens.map((w) => (w.endsWith('s') && w.length > 3 ? w.slice(0, -1) : w)).sort().join(' ');
+}
+
 // Wochentag-Kürzel aus "YYYY-MM-DD".
 function weekdayShort(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -803,25 +812,31 @@ async function renderHistory() {
 
   const allSorted = [...workouts].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.id - a.id));
 
-  // ---- Filter nach Trainingsname (ohne Groß-/Kleinschreibung) ----
+  // ---- Filter nach Trainingsname (Schreibvarianten werden zusammengefasst) ----
   const params = new URLSearchParams(location.hash.split('?')[1] || '');
-  const nameFilter = (params.get('name') || '').toLowerCase();
+  const nameFilter = params.get('name') || '';
 
-  // Namen fallunabhängig zusammenfassen: erste Schreibweise als Anzeige.
-  const nameByKey = new Map();
+  // Nach normalisiertem Schlüssel gruppieren; häufigste Schreibweise als Anzeige.
+  const groups = new Map(); // key -> Map(originalName -> count)
   for (const w of workouts) {
     if (!w.templateName) continue;
-    const k = w.templateName.toLowerCase();
-    if (!nameByKey.has(k)) nameByKey.set(k, w.templateName);
+    const k = sessionKey(w.templateName);
+    if (!k) continue;
+    if (!groups.has(k)) groups.set(k, new Map());
+    const m = groups.get(k);
+    m.set(w.templateName, (m.get(w.templateName) || 0) + 1);
   }
-  const names = [...nameByKey.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  const names = [...groups.entries()].map(([key, m]) => {
+    const label = [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0];
+    return { key, label };
+  }).sort((a, b) => a.label.localeCompare(b.label));
 
   const setFilter = (nameKey) => {
     location.hash = '#einheiten' + (nameKey ? '?name=' + encodeURIComponent(nameKey) : '');
   };
   const nameSel = h('select', { class: 'inp' },
     h('option', { value: '' }, tr('Alle Trainings', 'All sessions')),
-    ...names.map(([key, label]) => h('option', { value: key }, label)));
+    ...names.map(({ key, label }) => h('option', { value: key }, label)));
   nameSel.value = nameFilter;
   nameSel.addEventListener('change', () => setFilter(nameSel.value));
 
@@ -834,9 +849,8 @@ async function renderHistory() {
     ));
   }
 
-  // Filter anwenden (fallunabhängig).
-  const sorted = allSorted.filter((w) =>
-    !nameFilter || (w.templateName || '').toLowerCase() === nameFilter);
+  // Filter anwenden (über den normalisierten Schlüssel).
+  const sorted = allSorted.filter((w) => !nameFilter || sessionKey(w.templateName) === nameFilter);
 
   // Kopf-KPIs (auf die gefilterte Auswahl bezogen).
   const thisYM = todayStr().slice(0, 7);
