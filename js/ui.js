@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v56';
+const APP_VERSION = 'v57';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -277,6 +277,27 @@ async function renderDashboard() {
     kpi(latestBody ? latestBody.weight + ' kg' : '–', 'Körpergewicht'),
   );
   wrap.appendChild(kpis);
+
+  // 🛟 Backup-Erinnerung: Daten liegen nur auf diesem Gerät. Hinweis, wenn seit
+  // >7 Tagen (oder nie) kein Backup gemacht wurde und es überhaupt Daten gibt.
+  const lastBackupAt = await db.getMeta('lastBackupAt', null);
+  const backupStale = !lastBackupAt || (Date.now() - lastBackupAt) > 7 * 864e5;
+  if (workouts.length > 0 && backupStale) {
+    const daysTxt = lastBackupAt
+      ? tr(`letztes Backup vor ${Math.round((Date.now() - lastBackupAt) / 864e5)} Tagen`, `last backup ${Math.round((Date.now() - lastBackupAt) / 864e5)} days ago`)
+      : tr('noch kein Backup', 'no backup yet');
+    const card = h('div', { class: 'card' },
+      h('div', { class: 'suggestion warn' },
+        h('div', { class: 'sug-title' }, tr('🛟 Backup empfohlen', '🛟 Backup recommended')),
+        h('div', { class: 'sug-text' }, tr(
+          `Deine Daten liegen nur auf diesem Gerät (${daysTxt}). Sichere sie als Datei (in „Dateien“/iCloud), damit nichts verloren geht.`,
+          `Your data is only on this device (${daysTxt}). Save it as a file (to Files/iCloud) so nothing gets lost.`))),
+      h('div', { class: 'seg', style: 'margin-top:8px' },
+        h('button', { class: 'btn primary', onclick: exportBackup }, tr('Jetzt sichern', 'Back up now')),
+        h('button', { class: 'btn ghost', onclick: () => go('#einstellungen') }, tr('Optionen', 'Options')),
+      ));
+    wrap.appendChild(card);
+  }
 
   // ⭐ Hauptübungen – eigener Fokus
   const mainIds = await getMainLiftIds(exercises);
@@ -2053,6 +2074,7 @@ async function renderSettings() {
       const json = JSON.stringify(dump);
       taOut.value = json;
       taOut.focus(); taOut.select();
+      await db.setMeta('lastBackupAt', Date.now());
       try { await navigator.clipboard.writeText(json); toast(tr('Backup kopiert ✓ – jetzt in der anderen App einfügen', 'Backup copied ✓ — paste it in the other app')); }
       catch { toast(tr('Text unten ist markiert – mit „Kopieren" sichern', 'Text below is selected — tap “Copy”')); }
     } }, tr('Backup-Text erzeugen & kopieren', 'Create & copy backup text')),
@@ -2064,6 +2086,7 @@ async function renderSettings() {
       if (!confirm(L('Import ersetzt die aktuellen Daten. Fortfahren?'))) return;
       try {
         await importAll(JSON.parse(txt), { replace: true });
+        await db.setMeta('lastBackupAt', Date.now());
         alert(L('Backup importiert.'));
         location.hash = '#dashboard'; route();
       } catch (err) { alert(L('Import fehlgeschlagen: ') + err.message); }
@@ -2123,6 +2146,7 @@ async function exportBackup() {
   const dump = await exportAll();
   const json = JSON.stringify(dump, null, 2);
   const fname = `kraft-tracker-backup-${todayStr()}.json`;
+  await db.setMeta('lastBackupAt', Date.now());   // Backup-Erinnerung zurücksetzen
   // iPhone/Mobile: über den Teilen-Dialog als Datei sichern (zuverlässiger
   // als ein versteckter Download – „In Dateien sichern", AirDrop, …).
   try {
