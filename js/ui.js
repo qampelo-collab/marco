@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v60';
+const APP_VERSION = 'v61';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -337,6 +337,35 @@ function mainLiftRow(ex, ss) {
   );
 }
 
+// Datum des letzten neuen persönlichen Rekords über alle Übungen hinweg:
+// gewichtsbasiert = höheres e1RM als je zuvor, Körpergewicht = mehr
+// Gesamt-Wiederholungen in einer Einheit als je zuvor.
+function lastRecordDate(enrichedSets, formula) {
+  const byEx = new Map();
+  for (const s of enrichedSets) { if (!byEx.has(s.exerciseId)) byEx.set(s.exerciseId, []); byEx.get(s.exerciseId).push(s); }
+  let latest = null;
+  for (const [, sets] of byEx) {
+    const bodyweight = sets.every((s) => !(s.weight > 0)) && sets.some((s) => s.reps > 0);
+    if (bodyweight) {
+      const byDay = new Map();
+      for (const s of sets) { if (s.reps > 0 && s.date) byDay.set(s.date, (byDay.get(s.date) || 0) + s.reps); }
+      let best = 0;
+      for (const [date, total] of [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+        if (total > best) { best = total; if (!latest || date > latest) latest = date; }
+      }
+    } else {
+      const sorted = sets.filter((s) => s.date && s.weight > 0 && s.reps > 0)
+        .sort((a, b) => a.date.localeCompare(b.date) || (a.ts || 0) - (b.ts || 0));
+      let best = 0;
+      for (const s of sorted) {
+        const v = e1rm(s.weight, s.reps, formula);
+        if (v > best + 0.01) { best = v; if (!latest || s.date > latest) latest = s.date; }
+      }
+    }
+  }
+  return latest;
+}
+
 // ==================================================================
 //  DASHBOARD
 // ==================================================================
@@ -370,6 +399,22 @@ async function renderDashboard() {
         : tr(`noch ${Math.max(0, weeklyGoal - curCount)} bis zum Wochenziel`, `${Math.max(0, weeklyGoal - curCount)} to go this week`)),
     ),
   ));
+
+  // 🏆 Rekord-Countdown: seit wann kein neuer persönlicher Rekord mehr?
+  const lastRecDate = lastRecordDate(enriched, FORMULA);
+  if (lastRecDate) {
+    const daysSince = Math.floor((Date.now() - new Date(lastRecDate + 'T00:00:00').getTime()) / 864e5);
+    const hot = daysSince <= 6;
+    const level = hot ? 'good' : daysSince <= 20 ? 'tip' : 'warn';
+    const title = hot
+      ? tr('🏆 Frischer Rekord!', '🏆 Fresh record!')
+      : tr(`🏆 Seit ${daysSince} Tagen kein neuer Rekord`, `🏆 ${daysSince} days since your last record`);
+    const text = hot
+      ? tr(`Zuletzt am ${fmtDate(lastRecDate)} – weiter so.`, `Last one on ${fmtDate(lastRecDate)} — keep it up.`)
+      : tr('Zeit, eine deiner Übungen anzugreifen.', 'Time to go attack one of your lifts.');
+    wrap.appendChild(h('div', { class: 'card' },
+      h('div', { class: 'suggestion ' + level }, h('div', { class: 'sug-title' }, title), h('div', { class: 'sug-text' }, text))));
+  }
 
   // 📊 Bewegtes Gewicht pro Woche (letzte 10 Wochen).
   const tonnageSeries = weeklyTonnageSeries(enriched, 10);

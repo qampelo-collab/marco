@@ -135,6 +135,21 @@ export function stopRest() {
   if (el) { el.remove(); el = null; }
 }
 
+// Sobald die App wieder sichtbar wird (Tab-/App-Wechsel zurück, Bildschirm
+// wieder an), sofort den echten Stand prüfen. Wichtig auf iOS: dort wird
+// JavaScript im Hintergrund meist komplett angehalten (kein Ton, kein
+// Timer-Tick) – die Glocke kann also nicht ertönen, während das Handy
+// gesperrt ist oder eine andere App offen ist. Diese Prüfung sorgt dafür,
+// dass in dem Moment, in dem man wieder hinschaut, sofort der korrekte
+// Stand (inkl. Glocke, falls die Zeit inzwischen um ist) nachgeholt wird,
+// statt bis zum nächsten regulären Tick zu warten.
+function catchUp() { if (el) tick(); }
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') catchUp(); });
+  window.addEventListener('pageshow', catchUp);
+  window.addEventListener('focus', catchUp);
+}
+
 // Beim App-Start aufrufen: eine zuvor laufende Pause wiederherstellen, falls
 // die Seite (z.B. durch iOS im Hintergrund) neu geladen wurde, während sie lief.
 export function resumeRestTimer() {
