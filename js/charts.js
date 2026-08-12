@@ -67,6 +67,28 @@ export function lineChart(data, { width = 320, height = 160, color = '#4ade80', 
   return svg;
 }
 
+// Fortschrittsring (z.B. "3 von 4 Einheiten diese Woche"): value/max als
+// Kreisbogen. Farben werden vom Aufrufer übergeben (Theme-abhängig).
+export function progressRing(value, max, { size = 120, color = '#4ade80', trackColor = '#334155', textColor = '#e2e8f0' } = {}) {
+  const svg = ns('svg', { viewBox: `0 0 ${size} ${size}`, width: size, height: size, class: 'ring' });
+  const r = size / 2 - 10;
+  const cx = size / 2, cy = size / 2;
+  const c = 2 * Math.PI * r;
+  const pct = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
+  svg.appendChild(ns('circle', { cx, cy, r, fill: 'none', stroke: trackColor, 'stroke-width': 10 }));
+  if (pct > 0) {
+    svg.appendChild(ns('circle', {
+      cx, cy, r, fill: 'none', stroke: color, 'stroke-width': 10, 'stroke-linecap': 'round',
+      'stroke-dasharray': `${c}`, 'stroke-dashoffset': `${c * (1 - pct)}`,
+      transform: `rotate(-90 ${cx} ${cy})`,
+    }));
+  }
+  const t = ns('text', { x: cx, y: cy + size * 0.07, 'text-anchor': 'middle', fill: textColor, 'font-size': size * 0.22, 'font-weight': '700' });
+  t.textContent = `${value}/${max}`;
+  svg.appendChild(t);
+  return svg;
+}
+
 // Balkendiagramm für Kategorien: data = [{label, value, color?}]
 export function barChart(data, { width = 320, height = 160 } = {}) {
   const svg = ns('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', height: 'auto',

@@ -1,9 +1,9 @@
 // ui.js — Oberfläche: Router + alle Ansichten.
 
 import { db, exportAll, importAll } from './db.js';
-import { e1rm, progression, dayKey, totalVolume, weeklyVolumeByCategory, round1, bestE1rm, navyBodyFat, weightForReps, roundToStep } from './calc.js';
+import { e1rm, progression, dayKey, round1, bestE1rm, navyBodyFat, weightForReps, roundToStep } from './calc.js';
 import { buildSuggestions } from './coach.js';
-import { lineChart, barChart } from './charts.js';
+import { lineChart, barChart, progressRing } from './charts.js';
 import { extractSetsFromImage, VISION_MODELS, DEFAULT_VISION_MODEL } from './vision.js';
 import { PLAN, installPlan, parseTargetSets } from './plan.js';
 import { applyTheme, ACCENTS, DEFAULT_ACCENT, DEFAULT_THEME, THEME_MODES } from './theme.js';
@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v59';
+const APP_VERSION = 'v60';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -55,6 +55,61 @@ function monthLabel(ym) {
   const [y, m] = ym.split('-');
   const names = getLang() === 'en' ? MONTHS_EN : MONTHS_DE;
   return `${names[parseInt(m, 10) - 1]} ${y}`;
+}
+
+// ---- Wochen-Helfer (Woche = Montag–Sonntag) ----
+// Montag der Woche von `d` (Date oder "YYYY-MM-DD"), auf Mitternacht gesetzt.
+function mondayOf(d) {
+  const dt = new Date(typeof d === 'string' ? d + 'T00:00:00' : d);
+  const shift = (dt.getDay() + 6) % 7; // Mo=0 ... So=6
+  dt.setDate(dt.getDate() - shift);
+  dt.setHours(0, 0, 0, 0);
+  return dt;
+}
+function weekKey(d) { return mondayOf(d).toISOString().slice(0, 10); }
+
+// Trainings-Streak: aufeinanderfolgende Wochen (rückwärts ab der letzten
+// abgeschlossenen Woche), in denen mind. `goal` unterschiedliche Trainingstage
+// erreicht wurden. Die laufende Woche zählt nur mit, wenn sie das Ziel schon
+// erreicht hat (sie ist ja noch nicht vorbei, kann die Serie also nicht brechen).
+function computeStreak(dateStrings, goal) {
+  const byWeek = new Map(); // weekKey -> Set(date)
+  for (const d of dateStrings) {
+    if (!d) continue;
+    const k = weekKey(d);
+    if (!byWeek.has(k)) byWeek.set(k, new Set());
+    byWeek.get(k).add(d);
+  }
+  const curKey = weekKey(new Date());
+  const curCount = byWeek.get(curKey)?.size || 0;
+  let streak = 0;
+  const cursor = mondayOf(new Date());
+  for (;;) {
+    cursor.setDate(cursor.getDate() - 7);
+    const k = cursor.toISOString().slice(0, 10);
+    const cnt = byWeek.get(k)?.size || 0;
+    if (cnt >= goal) streak++; else break;
+  }
+  const curMet = goal > 0 && curCount >= goal;
+  return { streak: curMet ? streak + 1 : streak, curCount, curMet };
+}
+
+// Bewegtes Gesamtgewicht (kg) je Woche für die letzten `weeks` Wochen
+// (inkl. laufender Woche), als Balkendiagramm-Daten [{label, value}].
+function weeklyTonnageSeries(enrichedSets, weeks = 10) {
+  const start = mondayOf(new Date());
+  const buckets = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const d = new Date(start); d.setDate(d.getDate() - i * 7);
+    buckets.push({ key: d.toISOString().slice(0, 10), label: `${d.getDate()}.${d.getMonth() + 1}.`, value: 0 });
+  }
+  const idx = new Map(buckets.map((b, i) => [b.key, i]));
+  for (const s of enrichedSets) {
+    if (!s.date) continue;
+    const i = idx.get(weekKey(s.date));
+    if (i != null) buckets[i].value += (s.weight || 0) * (s.reps || 0);
+  }
+  return buckets.map((b) => ({ label: b.label, value: Math.round(b.value) }));
 }
 // Übungsnamen für den Abgleich vereinheitlichen: Groß/Klein, Umlaute und
 // Sonderzeichen ignorieren – verhindert Dubletten wie „Klimmzug"/„Klimmzüge".
@@ -229,6 +284,16 @@ async function deleteWorkout(id) {
   if (cur === id) await db.setMeta('currentWorkout', null);
 }
 
+// Wochenziel (Anzahl Einheiten) für Streak/Wochenring. Ohne explizite
+// Einstellung wird es aus der Zahl der Trainingspläne abgeleitet (2–6),
+// sonst Standard 4.
+async function getWeeklyGoal() {
+  const v = await db.getMeta('weeklyGoal', null);
+  if (v > 0) return v;
+  const n = (await db.all('templates')).length;
+  return (n >= 2 && n <= 6) ? n : 4;
+}
+
 // IDs der Hauptübungen (Meta). Beim ersten Mal automatisch aus Bankdrücken /
 // Kniebeugen / Klimmzüge (falls vorhanden) vorbelegt.
 async function getMainLiftIds(exercises) {
@@ -284,17 +349,36 @@ async function renderDashboard() {
   const wrap = h('div', { class: 'view' });
   wrap.appendChild(h('h1', {}, 'Übersicht'));
 
-  // KPI-Kacheln
-  const thisWeekVol = totalVolume(enriched.filter((s) =>
-    s.date && (Date.now() - new Date(s.date).getTime()) < 7 * 864e5));
-  const latestBody = [...body].sort((a, b) => b.date.localeCompare(a.date))[0];
-  const kpis = h('div', { class: 'kpi-grid' },
-    kpi(workouts.length, 'Einheiten'),
-    kpi(enriched.length, 'Sätze erfasst'),
-    kpi(Math.round(thisWeekVol).toLocaleString('de-DE'), 'kg Volumen (7 T.)'),
-    kpi(latestBody ? latestBody.weight + ' kg' : '–', 'Körpergewicht'),
-  );
-  wrap.appendChild(kpis);
+  // 🔥 Streak + 🎯 Wochenring: motivierender als reine Zähl-Kacheln.
+  const weeklyGoal = await getWeeklyGoal();
+  const { streak, curCount, curMet } = computeStreak(workouts.map((w) => w.date), weeklyGoal);
+  const rootStyle = getComputedStyle(document.documentElement);
+  const ringColor = rootStyle.getPropertyValue('--primary').trim() || '#4ade80';
+  const ringTrack = rootStyle.getPropertyValue('--border').trim() || '#334155';
+  const ringText = rootStyle.getPropertyValue('--text').trim() || '#e2e8f0';
+  wrap.appendChild(h('div', { class: 'card week-card' },
+    h('div', { class: 'streak-block' },
+      h('div', { class: 'streak-flame' }, streak > 0 ? '🔥' : '💤'),
+      h('div', {},
+        h('div', { class: 'streak-num' }, String(streak)),
+        h('div', { class: 'muted small' }, streak === 1 ? tr('Woche in Folge', 'week in a row') : tr('Wochen in Folge', 'weeks in a row'))),
+    ),
+    h('div', { class: 'ring-block' },
+      progressRing(curCount, weeklyGoal, { color: ringColor, trackColor: ringTrack, textColor: ringText }),
+      h('div', { class: 'muted small center' }, curMet
+        ? tr('Diese Woche geschafft ✓', 'This week done ✓')
+        : tr(`noch ${Math.max(0, weeklyGoal - curCount)} bis zum Wochenziel`, `${Math.max(0, weeklyGoal - curCount)} to go this week`)),
+    ),
+  ));
+
+  // 📊 Bewegtes Gewicht pro Woche (letzte 10 Wochen).
+  const tonnageSeries = weeklyTonnageSeries(enriched, 10);
+  if (tonnageSeries.some((b) => b.value > 0)) {
+    wrap.appendChild(h('div', { class: 'card' },
+      h('h2', {}, '📊 ' + tr('Bewegtes Gewicht pro Woche', 'Weight moved per week')),
+      barChart(tonnageSeries.map((b) => ({ ...b, color: ringColor }))),
+    ));
+  }
 
   // 🛟 Backup-Erinnerung: Daten liegen nur auf diesem Gerät. Hinweis, wenn seit
   // >7 Tagen (oder nie) kein Backup gemacht wurde und es überhaupt Daten gibt.
@@ -2042,6 +2126,20 @@ async function renderSettings() {
     h('p', { class: 'muted small' }, tr('Standard-Pause in Sekunden (gilt, wenn die Übung/der Plan keine eigene Zeit hat). Pro Übung einstellbar unter Übungen → Übung öffnen.',
       'Default rest in seconds (used when the exercise/plan has no own time). Set per exercise under Exercises → open an exercise.')),
     h('label', { class: 'field' }, h('span', {}, tr('Standard-Pause (Sek.)', 'Default rest (sec)')), restInp),
+  ));
+
+  // Wochenziel für Streak/Wochenring auf der Übersicht
+  const curGoal = await getWeeklyGoal();
+  const goalInp = h('input', { type: 'number', step: '1', min: '1', inputmode: 'numeric', class: 'inp', value: curGoal });
+  goalInp.addEventListener('change', async () => {
+    const v = parseInt(goalInp.value, 10);
+    if (v > 0) { await db.setMeta('weeklyGoal', v); toast(tr('Gespeichert ✓', 'Saved ✓')); }
+  });
+  wrap.appendChild(h('div', { class: 'card' },
+    h('h2', {}, '🔥 ' + tr('Wochenziel', 'Weekly goal')),
+    h('p', { class: 'muted small' }, tr('Anzahl Einheiten pro Woche für Streak und Wochenring auf der Übersicht.',
+      'Number of sessions per week for the streak and weekly ring on the overview.')),
+    h('label', { class: 'field' }, h('span', {}, tr('Einheiten/Woche', 'Sessions/week')), goalInp),
   ));
 
   // Weitere Bereiche
