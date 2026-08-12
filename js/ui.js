@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v61';
+const APP_VERSION = 'v62';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -110,6 +110,34 @@ function weeklyTonnageSeries(enrichedSets, weeks = 10) {
     if (i != null) buckets[i].value += (s.weight || 0) * (s.reps || 0);
   }
   return buckets.map((b) => ({ label: b.label, value: Math.round(b.value) }));
+}
+
+// Durchschnittliches Körpergewicht je Woche, gleicher 10-Wochen-Zeitraum wie
+// weeklyTonnageSeries (gleiche Wochen-Buckets) – zum direkten Vergleich, ob
+// das bewegte Gewicht trotz sinkendem Körpergewicht (Cut) weiter steigt.
+// Wochen ohne Eintrag übernehmen den letzten bekannten Wert (Fortschreibung);
+// Wochen vor dem allerersten Eintrag bleiben leer.
+function weeklyBodyweightSeries(bodyRows, weeks = 10) {
+  if (!bodyRows.length) return [];
+  const start = mondayOf(new Date());
+  const buckets = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const d = new Date(start); d.setDate(d.getDate() - i * 7);
+    buckets.push({ key: d.toISOString().slice(0, 10), sum: 0, n: 0 });
+  }
+  const idx = new Map(buckets.map((b, i) => [b.key, i]));
+  for (const r of bodyRows) {
+    if (!r.date || !(r.weight > 0)) continue;
+    const i = idx.get(weekKey(r.date));
+    if (i != null) { buckets[i].sum += r.weight; buckets[i].n += 1; }
+  }
+  let last = null;
+  const series = [];
+  for (const b of buckets) {
+    if (b.n > 0) last = b.sum / b.n;
+    if (last != null) series.push({ date: b.key, value: round1(last) });
+  }
+  return series;
 }
 // Übungsnamen für den Abgleich vereinheitlichen: Groß/Klein, Umlaute und
 // Sonderzeichen ignorieren – verhindert Dubletten wie „Klimmzug"/„Klimmzüge".
@@ -337,21 +365,26 @@ function mainLiftRow(ex, ss) {
   );
 }
 
-// Datum des letzten neuen persönlichen Rekords über alle Übungen hinweg:
-// gewichtsbasiert = höheres e1RM als je zuvor, Körpergewicht = mehr
-// Gesamt-Wiederholungen in einer Einheit als je zuvor.
-function lastRecordDate(enrichedSets, formula) {
+// Letzter neuer persönlicher Rekord über alle Übungen hinweg – inkl. welcher
+// Rekord es war (Übung + Wert), nicht nur das Datum. Gewichtsbasiert: höheres
+// e1RM als je zuvor. Körpergewicht: mehr Gesamt-Wiederholungen in einer
+// Einheit als je zuvor.
+function lastRecordInfo(enrichedSets, formula) {
   const byEx = new Map();
   for (const s of enrichedSets) { if (!byEx.has(s.exerciseId)) byEx.set(s.exerciseId, []); byEx.get(s.exerciseId).push(s); }
-  let latest = null;
+  let latest = null; // {date, name, kind, value, setWeight, setReps}
   for (const [, sets] of byEx) {
+    const name = sets[0]?.exerciseName || tr('Übung', 'exercise');
     const bodyweight = sets.every((s) => !(s.weight > 0)) && sets.some((s) => s.reps > 0);
     if (bodyweight) {
       const byDay = new Map();
       for (const s of sets) { if (s.reps > 0 && s.date) byDay.set(s.date, (byDay.get(s.date) || 0) + s.reps); }
       let best = 0;
       for (const [date, total] of [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-        if (total > best) { best = total; if (!latest || date > latest) latest = date; }
+        if (total > best) {
+          best = total;
+          if (!latest || date >= latest.date) latest = { date, name, kind: 'bodyweight', value: total };
+        }
       }
     } else {
       const sorted = sets.filter((s) => s.date && s.weight > 0 && s.reps > 0)
@@ -359,7 +392,10 @@ function lastRecordDate(enrichedSets, formula) {
       let best = 0;
       for (const s of sorted) {
         const v = e1rm(s.weight, s.reps, formula);
-        if (v > best + 0.01) { best = v; if (!latest || s.date > latest) latest = s.date; }
+        if (v > best + 0.01) {
+          best = v;
+          if (!latest || s.date >= latest.date) latest = { date: s.date, name, kind: 'weight', value: round1(v), setWeight: s.weight, setReps: s.reps };
+        }
       }
     }
   }
@@ -400,29 +436,45 @@ async function renderDashboard() {
     ),
   ));
 
-  // 🏆 Rekord-Countdown: seit wann kein neuer persönlicher Rekord mehr?
-  const lastRecDate = lastRecordDate(enriched, FORMULA);
-  if (lastRecDate) {
-    const daysSince = Math.floor((Date.now() - new Date(lastRecDate + 'T00:00:00').getTime()) / 864e5);
+  // 🏆 Rekord-Countdown: seit wann kein neuer persönlicher Rekord mehr –
+  // inkl. welche Übung und mit welchem Wert.
+  const rec = lastRecordInfo(enriched, FORMULA);
+  if (rec) {
+    const daysSince = Math.floor((Date.now() - new Date(rec.date + 'T00:00:00').getTime()) / 864e5);
     const hot = daysSince <= 6;
     const level = hot ? 'good' : daysSince <= 20 ? 'tip' : 'warn';
+    const valueText = rec.kind === 'bodyweight'
+      ? `${rec.value} ${tr('Wdh. gesamt', 'total reps')}`
+      : `${rec.value} kg 1RM (${rec.setWeight} kg × ${rec.setReps})`;
     const title = hot
-      ? tr('🏆 Frischer Rekord!', '🏆 Fresh record!')
+      ? tr(`🏆 Frischer Rekord: ${rec.name}`, `🏆 Fresh record: ${rec.name}`)
       : tr(`🏆 Seit ${daysSince} Tagen kein neuer Rekord`, `🏆 ${daysSince} days since your last record`);
     const text = hot
-      ? tr(`Zuletzt am ${fmtDate(lastRecDate)} – weiter so.`, `Last one on ${fmtDate(lastRecDate)} — keep it up.`)
-      : tr('Zeit, eine deiner Übungen anzugreifen.', 'Time to go attack one of your lifts.');
+      ? `${valueText} · ${fmtDate(rec.date)}`
+      : tr(`Zuletzt: ${rec.name} mit ${valueText} am ${fmtDate(rec.date)}. Zeit, eine Übung anzugreifen.`,
+           `Last one: ${rec.name} with ${valueText} on ${fmtDate(rec.date)}. Time to go attack a lift.`);
     wrap.appendChild(h('div', { class: 'card' },
       h('div', { class: 'suggestion ' + level }, h('div', { class: 'sug-title' }, title), h('div', { class: 'sug-text' }, text))));
   }
 
-  // 📊 Bewegtes Gewicht pro Woche (letzte 10 Wochen).
+  // 📊 Bewegtes Gewicht pro Woche (letzte 10 Wochen) + ⚖️ Ø Körpergewicht im
+  // selben Zeitraum darunter, damit direkt sichtbar ist, ob die Tonnage trotz
+  // Cut (sinkendem Körpergewicht) weiter steigt.
   const tonnageSeries = weeklyTonnageSeries(enriched, 10);
   if (tonnageSeries.some((b) => b.value > 0)) {
     wrap.appendChild(h('div', { class: 'card' },
       h('h2', {}, '📊 ' + tr('Bewegtes Gewicht pro Woche', 'Weight moved per week')),
       barChart(tonnageSeries.map((b) => ({ ...b, color: ringColor }))),
     ));
+    const bwSeries = weeklyBodyweightSeries(body, 10);
+    if (bwSeries.length >= 2) {
+      wrap.appendChild(h('div', { class: 'card' },
+        h('h2', {}, '⚖️ ' + tr('Ø Körpergewicht pro Woche', 'Avg body weight per week')),
+        h('p', { class: 'muted small' }, tr('Gleicher Zeitraum wie oben – so siehst du, ob dein bewegtes Gewicht trotz Cut weiter steigt.',
+          'Same period as above — so you can see whether your tonnage keeps rising despite a cut.')),
+        lineChart(bwSeries, { color: '#60a5fa' }),
+      ));
+    }
   }
 
   // 🛟 Backup-Erinnerung: Daten liegen nur auf diesem Gerät. Hinweis, wenn seit
