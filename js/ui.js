@@ -2136,40 +2136,107 @@ async function renderNutrition() {
 // ==================================================================
 //  AKTIVITÄT (Schritte)
 // ==================================================================
+// Tempo aus Distanz (km) + Dauer (Min.) als "M:SS /km".
+function paceStr(distanceKm, durationMin) {
+  if (!(distanceKm > 0) || !(durationMin > 0)) return null;
+  const perKm = durationMin / distanceKm;
+  const m = Math.floor(perKm), s = Math.round((perKm - m) * 60);
+  return `${m}:${String(s).padStart(2, '0')} /km`;
+}
+function activityParts(r) {
+  return [
+    r.steps ? `${r.steps.toLocaleString('de-DE')} ${tr('Schritte', 'steps')}` : null,
+    r.distance ? `🏃 ${r.distance} km` : null,
+    r.duration ? `${r.duration} ${tr('Min.', 'min')}` : null,
+    paceStr(r.distance, r.duration),
+  ].filter(Boolean).join(' · ');
+}
+
 async function renderActivity() {
   const rows = [...await db.all('activity')].sort((a, b) => b.date.localeCompare(a.date));
   const wrap = h('div', { class: 'view' });
-  wrap.appendChild(h('h1', {}, 'Aktivität'));
+  wrap.appendChild(h('h1', {}, tr('Aktivität', 'Activity')));
 
   const dateI = h('input', { type: 'date', value: todayStr(), class: 'inp' });
-  const stepI = h('input', { type: 'number', step: '100', inputmode: 'numeric', class: 'inp', placeholder: 'Schritte' });
+  const stepI = selectOnFocus(h('input', { type: 'text', inputmode: 'numeric', class: 'inp', placeholder: tr('Schritte (optional)', 'Steps (optional)') }));
+  const distI = selectOnFocus(h('input', { type: 'text', inputmode: 'decimal', class: 'inp', placeholder: tr('Distanz km (optional)', 'Distance km (optional)') }));
+  const durI = selectOnFocus(h('input', { type: 'text', inputmode: 'numeric', class: 'inp', placeholder: tr('Dauer Min. (optional)', 'Duration min (optional)') }));
+  const runHint = h('div', { class: 'hint' }, '');
+  const updateRunHint = () => { const p = paceStr(parseFloat(distI.value), parseFloat(durI.value)); runHint.textContent = p ? tr('Tempo: ', 'Pace: ') + p : ''; };
+  distI.addEventListener('input', updateRunHint); durI.addEventListener('input', updateRunHint);
 
   wrap.appendChild(h('div', { class: 'card' },
-    h('h2', {}, 'Neuer Eintrag'),
-    h('label', { class: 'field' }, h('span', {}, 'Datum'), dateI),
-    h('label', { class: 'field' }, h('span', {}, 'Schritte'), stepI),
+    h('h2', {}, tr('Neuer Eintrag', 'New entry')),
+    h('p', { class: 'muted small' }, tr('Schritte und/oder eine Laufeinheit (Distanz + Dauer) erfassen.', 'Log steps and/or a run (distance + duration).')),
+    h('label', { class: 'field' }, h('span', {}, tr('Datum', 'Date')), dateI),
+    h('label', { class: 'field' }, h('span', {}, tr('Schritte', 'Steps')), stepI),
+    h('div', { class: 'field-row' },
+      h('label', { class: 'field' }, h('span', {}, tr('🏃 Distanz (km)', '🏃 Distance (km)')), distI),
+      h('label', { class: 'field' }, h('span', {}, tr('Dauer (Min.)', 'Duration (min)')), durI),
+    ),
+    runHint,
     h('button', { class: 'btn primary', onclick: async () => {
-      if (!stepI.value) { alert(L('Bitte Schritte eingeben.')); return; }
-      await db.add('activity', { date: dateI.value || todayStr(), steps: num(stepI.value) });
+      const steps = num(stepI.value), distance = num(distI.value), duration = num(durI.value);
+      if (!steps && !distance && !duration) { alert(tr('Bitte Schritte oder eine Laufeinheit eingeben.', 'Please enter steps or a run.')); return; }
+      await db.add('activity', { date: dateI.value || todayStr(), steps, distance, duration });
+      toast(tr('Gespeichert ✓', 'Saved ✓'));
+      stepI.value = ''; distI.value = ''; durI.value = ''; runHint.textContent = '';
       route();
     } }, '+ Speichern'),
   ));
 
-  if (rows.length >= 2) {
-    const series = [...rows].reverse().map((r) => ({ date: r.date, value: r.steps }));
-    wrap.appendChild(h('div', { class: 'card' }, h('h2', {}, '👟 Schritte-Verlauf'), lineChart(series, { color: '#fbbf24' })));
+  const stepSeries = rows.filter((r) => r.steps > 0).sort((a, b) => a.date.localeCompare(b.date)).map((r) => ({ date: r.date, value: r.steps }));
+  if (stepSeries.length >= 2) {
+    wrap.appendChild(h('div', { class: 'card' }, h('h2', {}, '👟 ' + tr('Schritte-Verlauf', 'Steps trend')), lineChart(stepSeries, { color: '#fbbf24' })));
+  }
+  const runSeries = rows.filter((r) => r.distance > 0).sort((a, b) => a.date.localeCompare(b.date)).map((r) => ({ date: r.date, value: r.distance }));
+  if (runSeries.length >= 2) {
+    wrap.appendChild(h('div', { class: 'card' }, h('h2', {}, '🏃 ' + tr('Distanz je Lauf', 'Distance per run')), lineChart(runSeries, { color: '#4ade80', zeroBased: true })));
   }
 
-  const list = h('div', { class: 'card' }, h('h2', {}, 'Einträge'));
-  if (!rows.length) list.appendChild(h('p', { class: 'muted' }, 'Noch keine Einträge.'));
-  for (const r of rows.slice(0, 40)) {
-    list.appendChild(h('div', { class: 'set-item' },
-      h('div', { class: 'set-main' }, h('strong', {}, fmtDate(r.date)), h('div', { class: 'muted small' }, r.steps.toLocaleString('de-DE') + ' Schritte')),
-      h('button', { class: 'btn ghost small danger', onclick: async () => { await db.delete('activity', r.id); route(); } }, '✕'),
-    ));
-  }
+  const list = h('div', { class: 'card' }, h('h2', {}, tr('Einträge', 'Entries')));
+  if (!rows.length) list.appendChild(h('p', { class: 'muted' }, tr('Noch keine Einträge.', 'No entries yet.')));
+  for (const r of rows.slice(0, 40)) list.appendChild(makeActivityRow(r));
   wrap.appendChild(list);
   return wrap;
+
+  // Aktivitäts-Eintrag mit Anzeige- und Bearbeiten-Modus.
+  function makeActivityRow(r) {
+    const row = h('div', { class: 'set-item' });
+    const showView = () => {
+      clear(row);
+      row.appendChild(h('div', { class: 'set-main' },
+        h('strong', {}, `${weekdayShort(r.date)}, ${fmtDate(r.date)}`),
+        h('div', { class: 'muted small' }, activityParts(r) || tr('keine Werte', 'no values'))));
+      row.appendChild(h('button', { class: 'btn ghost small', onclick: showEdit, title: tr('Bearbeiten', 'Edit') }, '✎'));
+      row.appendChild(h('button', { class: 'btn ghost small danger', onclick: async () => { await db.delete('activity', r.id); route(); } }, '✕'));
+    };
+    const showEdit = () => {
+      clear(row);
+      const dE = h('input', { type: 'date', class: 'inp', value: r.date || todayStr() });
+      const sE = selectOnFocus(h('input', { type: 'text', inputmode: 'numeric', class: 'inp', value: r.steps ?? '', placeholder: tr('Schritte', 'Steps') }));
+      const dsE = selectOnFocus(h('input', { type: 'text', inputmode: 'decimal', class: 'inp', value: r.distance ?? '', placeholder: tr('Distanz km', 'Distance km') }));
+      const duE = selectOnFocus(h('input', { type: 'text', inputmode: 'numeric', class: 'inp', value: r.duration ?? '', placeholder: tr('Dauer Min.', 'Duration min') }));
+      row.appendChild(h('div', { class: 'set-main', style: 'width:100%' },
+        h('label', { class: 'field' }, h('span', {}, tr('Datum', 'Date')), dE),
+        h('label', { class: 'field' }, h('span', {}, tr('Schritte', 'Steps')), sE),
+        h('div', { class: 'field-row' },
+          h('label', { class: 'field' }, h('span', {}, tr('Distanz (km)', 'Distance (km)')), dsE),
+          h('label', { class: 'field' }, h('span', {}, tr('Dauer (Min.)', 'Duration (min)')), duE),
+        ),
+        h('div', { class: 'seg' },
+          h('button', { class: 'btn primary small', onclick: async () => {
+            await db.put('activity', { ...r, date: dE.value || r.date, steps: num(sE.value), distance: num(dsE.value), duration: num(duE.value) });
+            toast(tr('Gespeichert ✓', 'Saved ✓'));
+            route();
+          } }, tr('✓ Speichern', '✓ Save')),
+          h('button', { class: 'btn ghost small', onclick: showView }, tr('Abbrechen', 'Cancel')),
+        ),
+      ));
+    };
+    showView();
+    return row;
+  }
 }
 
 // ==================================================================
