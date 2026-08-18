@@ -56,8 +56,8 @@ const DICT = {
   '‹ Zurück zu Mehr': '‹ Back to More',
   'Noch kein Plan installiert.': 'No plan installed yet.',
   '▶ Starten': '▶ Start', 'Plan zurücksetzen / aktualisieren': 'Reset / update plan',
-  'Mo Tennis · Di Push · Mi Legs+Schwachstelle · Do Pull · Fr Laufen · Sa Upper #2 · So Ruhe':
-    'Mon tennis · Tue push · Wed legs+weak point · Thu pull · Fri running · Sat upper #2 · Sun rest',
+  'Mo Tennis · Di Push · Mi Legs+Schwachstelle · Do Pull · Fr Laufen · Sa Finisher · So Ruhe':
+    'Mon tennis · Tue push · Wed legs+weak point · Thu pull · Fri running · Sat finisher · Sun rest',
   'Fokus auf Bankdrücken, Kniebeugen & Klimmzüge: jede Woche +1 Wdh, +2,5 kg oder sauberere Ausführung. Rest: „irgendwie steigern", solange die drei Hauptlifte laufen.':
     'Focus on bench press, squat & pull-ups: each week +1 rep, +2.5 kg or cleaner form. The rest: just progress somehow, as long as the three main lifts keep moving.',
   // Körper
@@ -116,7 +116,7 @@ const SUBST = [
   ['Di – Push (~42 Min)', 'Tue – Push (~42 min)'],
   ['Mi – Legs (reduziert) + Schwachstelle (~40 Min)', 'Wed – Legs (reduced) + weak point (~40 min)'],
   ['Do – Pull (~42 Min)', 'Thu – Pull (~42 min)'],
-  ['Sa – Upper #2 (~40 Min)', 'Sat – Upper #2 (~40 min)'],
+  ['Sa – Finisher (~40 Min)', 'Sat – Finisher (~40 min)'],
   ['4er-Split · 45 Min', '4-day split · 45 min'],
   ['Trainingspläne', 'Training plans'],
   [' installieren', ' install'],

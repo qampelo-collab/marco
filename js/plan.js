@@ -1,5 +1,5 @@
 // plan.js — Trainingsplan als wiederverwendbare Vorlagen.
-// Dein 4er-Split (Push / Legs+Schwachstelle / Pull / Upper #2), auf 45 Min ausgelegt.
+// Dein 4er-Split (Push / Legs+Schwachstelle / Pull / Finisher), auf 45 Min ausgelegt.
 
 export const PLAN = {
   name: '4er-Split · 45 Min',
@@ -32,7 +32,7 @@ export const PLAN = {
       ],
     },
     {
-      key: 'upper2', title: 'Sa – Upper #2 (~40 Min)', items: [
+      key: 'upper2', title: 'Sa – Finisher (~40 Min)', items: [
         { name: 'Schrägbankdrücken', cat: 'push', scheme: '3×10-12',     rest: '90s', note: 'Kurzhantel · höhere Wdh' },
         { name: 'Seilzugrudern',     cat: 'pull', scheme: '3×10-12',     rest: '90s', note: 'enger Griff' },
         { name: 'Ausfallschritte',   cat: 'legs', scheme: '2×10-12/Bein', rest: '90s', note: 'Kurzhantel' },
@@ -47,7 +47,7 @@ export const PLAN = {
   progressionNote:
     'Fokus auf Bankdrücken, Kniebeugen & Klimmzüge: jede Woche +1 Wdh, +2,5 kg oder sauberere Ausführung. ' +
     'Rest: „irgendwie steigern", solange die drei Hauptlifte laufen.',
-  schedule: 'Mo Tennis · Di Push · Mi Legs+Schwachstelle · Do Pull · Fr Laufen · Sa Upper #2 · So Ruhe',
+  schedule: 'Mo Tennis · Di Push · Mi Legs+Schwachstelle · Do Pull · Fr Laufen · Sa Finisher · So Ruhe',
 };
 
 // Zielanzahl Sätze aus einem Schema wie "4×6-8" oder "2×45-60s" lesen.
