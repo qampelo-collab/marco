@@ -1,7 +1,7 @@
 // ui.js — Oberfläche: Router + alle Ansichten.
 
 import { db, exportAll, importAll } from './db.js';
-import { e1rm, progression, dayKey, round1, bestE1rm, navyBodyFat, weightForReps, roundToStep } from './calc.js';
+import { e1rm, progression, dayKey, round1, bestE1rm, navyBodyFat, weightForReps, roundToStep, totalVolume } from './calc.js';
 import { buildSuggestions } from './coach.js';
 import { lineChart, barChart, progressRing } from './charts.js';
 import { extractSetsFromImage, VISION_MODELS, DEFAULT_VISION_MODEL } from './vision.js';
@@ -627,10 +627,151 @@ function kpi(value, label) {
 }
 
 // ==================================================================
+//  ABSCHLUSSBILDSCHIRM (nach dem Speichern/Beenden einer Einheit)
+// ==================================================================
+// Vergleicht die Sätze der gerade abgeschlossenen Einheit mit der bisherigen
+// Bestleistung je Übung (Rekord bzw. Beinahe-Rekord) und mit der letzten
+// vergleichbaren Einheit (gleicher Tagesname) beim Gesamtvolumen.
+async function computeSessionSummary(workoutId) {
+  const { enriched, workouts, exercises } = await loadEnrichedSets();
+  const eById = new Map(exercises.map((e) => [e.id, e]));
+  const workout = workouts.find((w) => w.id === workoutId);
+  const sessionSets = enriched.filter((s) => s.workoutId === workoutId);
+  if (!workout || !sessionSets.length) return null;
+
+  const byEx = new Map();
+  for (const s of sessionSets) { if (!byEx.has(s.exerciseId)) byEx.set(s.exerciseId, []); byEx.get(s.exerciseId).push(s); }
+
+  const records = [], nearMisses = [];
+  for (const [exId, sSets] of byEx) {
+    const name = sSets[0].exerciseName;
+    const allExSets = enriched.filter((s) => s.exerciseId === exId);
+    const bodyweight = allExSets.every((s) => !(s.weight > 0)) && allExSets.some((s) => s.reps > 0);
+    const otherSets = allExSets.filter((s) => s.workoutId !== workoutId);
+
+    if (bodyweight) {
+      const byDay = new Map();
+      for (const s of otherSets) { if (s.reps > 0 && s.date) byDay.set(s.date, (byDay.get(s.date) || 0) + s.reps); }
+      const prevBest = byDay.size ? Math.max(...byDay.values()) : 0;
+      const thisTotal = sSets.reduce((sum, s) => sum + (s.reps || 0), 0);
+      if (thisTotal <= 0) continue;
+      if (thisTotal > prevBest) records.push({ name, kind: 'bodyweight', value: thisTotal, prevBest });
+      else if (prevBest > 0 && thisTotal >= prevBest * 0.9) nearMisses.push({ name, kind: 'bodyweight', value: thisTotal, prevBest, gap: prevBest - thisTotal });
+    } else {
+      let prevBest = 0;
+      for (const s of otherSets) { if (s.weight > 0 && s.reps > 0) prevBest = Math.max(prevBest, e1rm(s.weight, s.reps, FORMULA)); }
+      let sessionBest = 0, bestSet = null;
+      for (const s of sSets) {
+        if (s.weight > 0 && s.reps > 0) { const v = e1rm(s.weight, s.reps, FORMULA); if (v > sessionBest) { sessionBest = v; bestSet = s; } }
+      }
+      if (!bestSet) continue;
+      if (sessionBest > prevBest + 0.01) {
+        records.push({ name, kind: 'weight', value: round1(sessionBest), prevBest: round1(prevBest), setWeight: bestSet.weight, setReps: bestSet.reps });
+      } else if (prevBest > 0 && sessionBest >= prevBest * 0.9) {
+        nearMisses.push({ name, kind: 'weight', value: round1(sessionBest), prevBest: round1(prevBest), gapPct: round1((1 - sessionBest / prevBest) * 100) });
+      }
+    }
+  }
+  records.sort((a, b) => a.name.localeCompare(b.name));
+  nearMisses.sort((a, b) => a.name.localeCompare(b.name));
+
+  // Volumen ggü. letzter Einheit mit demselben Tagesnamen (z.B. "Mi – Legs+ ...").
+  const label = workout.templateName || workout.notes || null;
+  const thisVolume = totalVolume(sessionSets);
+  let volumeCompare = null;
+  if (label) {
+    const prevWorkouts = workouts
+      .filter((w) => w.id !== workoutId && (w.templateName || w.notes) === label)
+      .sort((a, b) => b.date.localeCompare(a.date));
+    if (prevWorkouts[0]) {
+      const prevVolume = totalVolume(enriched.filter((s) => s.workoutId === prevWorkouts[0].id));
+      if (prevVolume > 0) volumeCompare = { prevVolume: round1(prevVolume), deltaPct: round1(((thisVolume - prevVolume) / prevVolume) * 100) };
+    }
+  }
+
+  const goal = await getWeeklyGoal();
+  const { curCount } = computeStreak(workouts.map((w) => w.date), goal);
+
+  return { workout, label, sessionSets, exCount: byEx.size, thisVolume: round1(thisVolume), records, nearMisses, volumeCompare, curCount, goal };
+}
+
+function renderSessionSummary(s) {
+  const wrap = h('div', { class: 'view' });
+  const dateLabel = `${weekdayShort(s.workout.date)}, ${fmtDate(s.workout.date)}`;
+  wrap.appendChild(h('h1', {}, '✅ ' + tr('Einheit gespeichert', 'Session saved')));
+  wrap.appendChild(h('p', { class: 'muted' }, (s.label ? s.label + ' · ' : '') + dateLabel));
+
+  // Kopfzeile: kurzer Motivationssatz je nach Ergebnis.
+  let headline;
+  if (s.records.length) {
+    headline = s.records.length === 1
+      ? tr(`🏆 Neuer Rekord bei ${s.records[0].name}!`, `🏆 New record on ${s.records[0].name}!`)
+      : tr(`🏆 ${s.records.length} neue Rekorde in dieser Einheit!`, `🏆 ${s.records.length} new records this session!`);
+  } else if (s.volumeCompare && s.volumeCompare.deltaPct > 0) {
+    headline = tr('📈 Mehr bewegtes Gewicht als letztes Mal', '📈 More weight moved than last time');
+  } else if (s.nearMisses.length) {
+    headline = tr('🔥 Ganz nah an einem neuen Rekord dran', '🔥 Very close to a new record');
+  } else {
+    headline = tr('💪 Solide Einheit im Kasten', '💪 Solid session in the books');
+  }
+  wrap.appendChild(h('div', { class: 'card' }, h('h2', {}, headline),
+    h('p', { class: 'muted small' }, tr(
+      `${s.exCount} Übung(en) · ${s.thisVolume.toLocaleString('de-DE')} kg bewegtes Gewicht`,
+      `${s.exCount} exercise(s) · ${s.thisVolume.toLocaleString('en-US')} kg moved`))));
+
+  if (s.records.length) {
+    const card = h('div', { class: 'card' }, h('h2', {}, '🏆 ' + tr('Neue Rekorde', 'New records')));
+    for (const r of s.records) {
+      const detail = r.kind === 'bodyweight'
+        ? tr(`${r.value} Wdh. gesamt${r.prevBest ? ` (vorher ${r.prevBest})` : ' (erste Einheit mit Werten)'}`,
+             `${r.value} reps total${r.prevBest ? ` (previous ${r.prevBest})` : ' (first session with values)'}`)
+        : tr(`${r.setWeight} kg × ${r.setReps}${r.prevBest ? ` · e1RM ${r.value} kg (vorher ${r.prevBest} kg)` : ' · erster Bestwert'}`,
+             `${r.setWeight} kg × ${r.setReps}${r.prevBest ? ` · e1RM ${r.value} kg (previous ${r.prevBest} kg)` : ' · first best'}`);
+      card.appendChild(h('div', { class: 'set-item' }, h('div', { class: 'set-main' }, h('strong', {}, r.name), h('div', { class: 'muted small' }, detail))));
+    }
+    wrap.appendChild(card);
+  }
+
+  if (s.nearMisses.length) {
+    const card = h('div', { class: 'card' }, h('h2', {}, '🔥 ' + tr('Beinahe-Rekorde', 'Close calls')));
+    for (const m of s.nearMisses) {
+      const detail = m.kind === 'bodyweight'
+        ? tr(`${m.value} von ${m.prevBest} Wdh. – ${m.gap} fehlten`, `${m.value} of ${m.prevBest} reps — ${m.gap} short`)
+        : tr(`${m.value} kg e1RM – nur ${m.gapPct}% unter Bestwert (${m.prevBest} kg)`, `${m.value} kg e1RM — only ${m.gapPct}% below best (${m.prevBest} kg)`);
+      card.appendChild(h('div', { class: 'set-item' }, h('div', { class: 'set-main' }, h('strong', {}, m.name), h('div', { class: 'muted small' }, detail))));
+    }
+    wrap.appendChild(card);
+  }
+
+  if (s.volumeCompare) {
+    const d = s.volumeCompare.deltaPct;
+    const sign = d > 0 ? '+' : '';
+    wrap.appendChild(h('div', { class: 'card' }, h('h2', {}, '📊 ' + tr('Volumen ggü. letztem Mal', 'Volume vs. last time')),
+      h('p', {}, `${s.thisVolume.toLocaleString('de-DE')} kg `, h('span', { style: d >= 0 ? 'color:var(--primary)' : 'color:var(--danger)' }, `(${sign}${d}%)`)),
+      h('p', { class: 'muted small' }, tr(`letztes Mal: ${s.volumeCompare.prevVolume.toLocaleString('de-DE')} kg`, `last time: ${s.volumeCompare.prevVolume.toLocaleString('en-US')} kg`))));
+  }
+
+  wrap.appendChild(h('div', { class: 'card' }, h('h2', {}, '🔥 ' + tr('Wochenziel', 'Weekly goal')),
+    h('p', {}, tr(`${s.curCount} von ${s.goal} Einheiten diese Woche`, `${s.curCount} of ${s.goal} sessions this week`))));
+
+  wrap.appendChild(h('button', { class: 'btn primary big-pause', onclick: () => go('#dashboard') }, tr('Weiter zur Übersicht', 'Continue to overview')));
+  return wrap;
+}
+
+// ==================================================================
 //  TRAINING ERFASSEN
 // ==================================================================
 async function renderTraining() {
   setRestDoneCallback(null);   // wird in einer offenen Einheit unten gesetzt
+
+  // Abschlussbildschirm nach dem Speichern/Beenden einer Einheit (#training?review=<id>).
+  const reviewParams = new URLSearchParams(location.hash.split('?')[1] || '');
+  const reviewId = reviewParams.get('review');
+  if (reviewId) {
+    const summary = await computeSessionSummary(parseInt(reviewId, 10));
+    if (summary) return renderSessionSummary(summary);
+  }
+
   const { enriched, workouts: allWorkouts, exercises } = await loadEnrichedSets();
   const workouts = [...allWorkouts].sort((a, b) => b.date.localeCompare(a.date));
 
@@ -678,7 +819,7 @@ async function renderTraining() {
         first = false; n++;
       }
       toast(tr(`Gespeichert ✓ (${n} Sätze)`, `Saved ✓ (${n} sets)`));
-      route();
+      location.hash = '#training?review=' + wid;
     }
     // Foto auslesen (wird nach dem Fotografieren automatisch aufgerufen).
     async function runExtraction() {
@@ -875,7 +1016,10 @@ async function renderTraining() {
     h('div', { class: 'chart-head' },
       h('h2', {}, tr('Einheit bearbeiten', 'Edit session')),
       h('button', { class: 'btn ghost small', onclick: async () => {
-        await db.setMeta('currentWorkout', null); route();
+        const wid = current.id;
+        await db.setMeta('currentWorkout', null);
+        if (sets.length) location.hash = '#training?review=' + wid;
+        else route();
       } }, tr('Fertig / schließen', 'Done / close')),
     ),
     h('label', { class: 'field' }, h('span', {}, tr('📅 Datum der Einheit', '📅 Session date')), dateEdit),
