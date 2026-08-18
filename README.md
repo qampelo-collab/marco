@@ -1,7 +1,7 @@
 # 🏋️ Kraft-Tracker
 
 Persönliche PWA (Progressive Web App) zum Tracken von Krafttraining, Progression,
-Körpermaßen, Ernährung und Alltagsaktivität. **Läuft komplett offline, alle Daten
+Körpermaßen und Alltagsaktivität. **Läuft komplett offline, alle Daten
 bleiben lokal auf deinem Gerät** (IndexedDB) – kein Server, kein Account, kein Tracking.
 
 ## Funktionen
@@ -12,11 +12,9 @@ bleiben lokal auf deinem Gerät** (IndexedDB) – kein Server, kein Account, kei
 - **Kraftentwicklung** – geschätztes 1-Rep-Max (1RM) pro Satz und Übung, mit Verlauf,
   %-Steigerung und Trend (kg/Woche über lineare Regression).
 - **Coach-Vorschläge** – regelbasierte Tipps: Plateau-Erkennung, Muskelgruppen-Balance
-  (Drücken/Ziehen/Beine), progressive Belastungssteigerung, Protein pro kg Körpergewicht,
-  Schritte, Trainingsfrequenz.
+  (Drücken/Ziehen/Beine), progressive Belastungssteigerung, Trainingsfrequenz.
 - **Körper** – Körpergewicht und Maße (Brust, Taille, Arm, Oberschenkel) mit Verlaufsgrafik.
-- **Ernährung** – Protein und Kalorien pro Tag.
-- **Aktivität** – Schritte pro Tag.
+- **Aktivität** – Schritte und Laufeinheiten (Distanz, Dauer, Tempo) pro Tag.
 - **Backup** – Export/Import aller Daten als JSON-Datei.
 
 ## Berechnungen (Modul `js/calc.js`)

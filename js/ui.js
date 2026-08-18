@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v66';
+const APP_VERSION = 'v67';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -204,7 +204,6 @@ const routes = {
   '#plaene': renderPlans,
   '#fortschritt': renderProgress,
   '#koerper': renderBody,
-  '#ernaehrung': renderNutrition,
   '#aktivitaet': renderActivity,
   '#einstellungen': renderSettings,
 };
@@ -407,8 +406,8 @@ function lastRecordInfo(enrichedSets, formula) {
 // ==================================================================
 async function renderDashboard() {
   const { enriched, workouts, exercises } = await loadEnrichedSets();
-  const [body, nutrition, activity] = await Promise.all([
-    db.all('body'), db.all('nutrition'), db.all('activity'),
+  const [body, activity] = await Promise.all([
+    db.all('body'), db.all('activity'),
   ]);
 
   const wrap = h('div', { class: 'view' });
@@ -512,7 +511,7 @@ async function renderDashboard() {
   }
 
   // Coach-Vorschläge
-  const suggestions = buildSuggestions({ enrichedSets: enriched, exercises, body, nutrition, activity, formula: FORMULA });
+  const suggestions = buildSuggestions({ enrichedSets: enriched, exercises, body, activity, formula: FORMULA });
   const coachCard = h('div', { class: 'card' }, h('h2', {}, '🧠 Coach-Vorschläge'));
   if (suggestions.length === 0) {
     coachCard.appendChild(h('p', { class: 'muted' }, 'Erfasse ein paar Einheiten – dann bekommst du hier passende Tipps.'));
@@ -2088,52 +2087,6 @@ async function renderBody() {
 }
 
 // ==================================================================
-//  ERNÄHRUNG (Protein / Kalorien)
-// ==================================================================
-async function renderNutrition() {
-  const rows = [...await db.all('nutrition')].sort((a, b) => b.date.localeCompare(a.date));
-  const wrap = h('div', { class: 'view' });
-  wrap.appendChild(h('h1', {}, 'Ernährung'));
-
-  const dateI = h('input', { type: 'date', value: todayStr(), class: 'inp' });
-  const protI = h('input', { type: 'number', step: '1', inputmode: 'numeric', class: 'inp', placeholder: 'g' });
-  const kcalI = h('input', { type: 'number', step: '1', inputmode: 'numeric', class: 'inp', placeholder: 'kcal' });
-  const noteI = h('input', { class: 'inp', placeholder: 'Notiz (optional)' });
-
-  wrap.appendChild(h('div', { class: 'card' },
-    h('h2', {}, 'Neuer Eintrag'),
-    h('label', { class: 'field' }, h('span', {}, 'Datum'), dateI),
-    h('div', { class: 'field-row' },
-      h('label', { class: 'field' }, h('span', {}, 'Protein (g)'), protI),
-      h('label', { class: 'field' }, h('span', {}, 'Kalorien'), kcalI),
-    ),
-    h('label', { class: 'field' }, h('span', {}, 'Notiz'), noteI),
-    h('button', { class: 'btn primary', onclick: async () => {
-      if (!protI.value && !kcalI.value) { alert(L('Bitte Protein oder Kalorien eingeben.')); return; }
-      await db.add('nutrition', { date: dateI.value || todayStr(), protein: num(protI.value), calories: num(kcalI.value), notes: noteI.value.trim() });
-      route();
-    } }, '+ Speichern'),
-  ));
-
-  if (rows.length >= 2) {
-    const series = [...rows].reverse().filter((r) => r.protein).map((r) => ({ date: r.date, value: r.protein }));
-    if (series.length >= 2) wrap.appendChild(h('div', { class: 'card' }, h('h2', {}, '🥩 Protein-Verlauf (g/Tag)'), lineChart(series, { color: '#f472b6' })));
-  }
-
-  const list = h('div', { class: 'card' }, h('h2', {}, 'Einträge'));
-  if (!rows.length) list.appendChild(h('p', { class: 'muted' }, 'Noch keine Einträge.'));
-  for (const r of rows.slice(0, 40)) {
-    const parts = [r.protein ? r.protein + ' g Protein' : null, r.calories ? r.calories + ' kcal' : null, r.notes || null].filter(Boolean);
-    list.appendChild(h('div', { class: 'set-item' },
-      h('div', { class: 'set-main' }, h('strong', {}, fmtDate(r.date)), h('div', { class: 'muted small' }, parts.join(' · '))),
-      h('button', { class: 'btn ghost small danger', onclick: async () => { await db.delete('nutrition', r.id); route(); } }, '✕'),
-    ));
-  }
-  wrap.appendChild(list);
-  return wrap;
-}
-
-// ==================================================================
 //  AKTIVITÄT (Schritte)
 // ==================================================================
 // Tempo aus Distanz (km) + Dauer (Min.) als "M:SS /km".
@@ -2318,9 +2271,6 @@ async function renderSettings() {
   ));
   wrap.appendChild(h('div', { class: 'card' },
     h('h2', {}, 'Tracking'),
-    h('div', { class: 'row-item', onclick: () => go('#ernaehrung') },
-      h('div', {}, h('strong', {}, '🥩 Ernährung'), h('div', { class: 'muted small' }, 'Protein & Kalorien erfassen')),
-      h('span', { class: 'chev' }, '›')),
     h('div', { class: 'row-item', onclick: () => go('#aktivitaet') },
       h('div', {}, h('strong', {}, '👟 Aktivität'), h('div', { class: 'muted small' }, 'Schritte erfassen')),
       h('span', { class: 'chev' }, '›')),

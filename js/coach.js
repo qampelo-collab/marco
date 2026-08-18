@@ -2,14 +2,14 @@
 // Bewusst knapp und priorisiert (max. 3 Hinweise), damit Wichtiges nicht
 // in generischem Coaching untergeht. Ausgabe: [{type, level, title, text}].
 
-import { progression, weeklyVolumeByCategory, round1 } from './calc.js';
+import { progression, weeklyVolumeByCategory } from './calc.js';
 import { getLang } from './i18n.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const en = () => getLang() === 'en';
 const pick = (de, enStr) => (en() ? enStr : de);
 
-export function buildSuggestions({ enrichedSets, exercises, body, nutrition, activity, formula = 'epley' }) {
+export function buildSuggestions({ enrichedSets, exercises, body, activity, formula = 'epley' }) {
   const cand = []; // {p (Priorität), level, title, text}
   const now = Date.now();
   const byExercise = groupBy(enrichedSets, (s) => s.exerciseId);
@@ -95,18 +95,6 @@ export function buildSuggestions({ enrichedSets, exercises, body, nutrition, act
         `Last done ${overdue.days} days ago — plan it back in before progress fades.`) });
   }
 
-  // 4) Protein zu niedrig (nur wenn Gewicht & Protein getrackt sind).
-  const lb = latestBy(body, 'date'), ln = latestBy(nutrition, 'date');
-  if (lb?.weight && ln?.protein) {
-    const perKg = ln.protein / lb.weight;
-    if (perKg < 1.6) {
-      cand.push({ p: 66, level: 'tip',
-        title: pick('Protein zu niedrig', 'Protein too low'),
-        text: pick(`Zuletzt ${round1(perKg)} g/kg. Für Muskelaufbau ~1,6–2,2 g/kg (${Math.round(lb.weight * 1.6)}–${Math.round(lb.weight * 2.2)} g/Tag).`,
-          `Last ${round1(perKg)} g/kg. For growth ~1.6–2.2 g/kg (${Math.round(lb.weight * 1.6)}–${Math.round(lb.weight * 2.2)} g/day).`) });
-    }
-  }
-
   // Nach Priorität sortieren, nur die Top 3 – der Rest ist Rauschen.
   cand.sort((a, b) => b.p - a.p);
   const top = cand.slice(0, 3).map(({ level, title, text }) => ({ type: 'tip', level, title, text }));
@@ -124,8 +112,4 @@ function groupBy(arr, keyFn) {
   const m = new Map();
   for (const x of arr) { const k = keyFn(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); }
   return m;
-}
-function latestBy(arr, field) {
-  if (!arr || !arr.length) return null;
-  return [...arr].sort((a, b) => new Date(b[field]) - new Date(a[field]))[0];
 }

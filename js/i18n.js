@@ -65,9 +65,6 @@ const DICT = {
   'Brust': 'Chest', 'Taille': 'Waist', 'Arm': 'Arm', 'Oberschenkel': 'Thigh',
   '+ Speichern': '+ Save', '⚖️ Gewichtsverlauf': '⚖️ Weight trend',
   'Einträge': 'Entries', 'Noch keine Einträge.': 'No entries yet.',
-  // Ernährung
-  'Ernährung': 'Nutrition', 'Protein (g)': 'Protein (g)', 'Kalorien': 'Calories', 'Notiz': 'Note',
-  '🥩 Protein-Verlauf (g/Tag)': '🥩 Protein trend (g/day)',
   // Aktivität
   'Aktivität': 'Activity', 'Schritte': 'Steps', '👟 Schritte-Verlauf': '👟 Steps trend',
   // Einstellungen
@@ -76,7 +73,7 @@ const DICT = {
   'Vorlagen starten (4er-Split)': 'Start templates (4-day split)',
   '📊 Fortschritt': '📊 Progress', 'Prognose & Milestones': 'Forecast & milestones',
   '⏱ Pause starten': '⏱ Start rest',
-  'Protein & Kalorien erfassen': 'Log protein & calories', 'Schritte erfassen': 'Log steps',
+  'Schritte erfassen': 'Log steps',
   '1RM-Formel': '1RM formula', 'Formel zur Schätzung deiner Maximalkraft.':
     'Formula to estimate your one-rep max.', 'Epley (Standard)': 'Epley (default)',
   '🤖 KI: Werte aus Foto lesen': '🤖 AI: read values from photo',
@@ -99,7 +96,6 @@ const DICT = {
   'Bitte Gewicht und Wiederholungen eingeben.': 'Please enter weight and reps.',
   'Bitte Namen eingeben.': 'Please enter a name.',
   'Bitte mindestens einen Wert eingeben.': 'Please enter at least one value.',
-  'Bitte Protein oder Kalorien eingeben.': 'Please enter protein or calories.',
   'Bitte Schritte eingeben.': 'Please enter steps.',
   'Plan neu installieren? Vorhandene Vorlagen dieses Plans werden ersetzt (deine Trainingsdaten bleiben erhalten).':
     'Reinstall plan? Existing templates of this plan are replaced (your training data stays).',
@@ -142,7 +138,6 @@ const SUBST = [
   ['Brust ', 'Chest '],
   ['Taille ', 'Waist '],
   ['OSchenkel ', 'Thigh '],
-  [' g Protein', ' g protein'],
   ['Schritte', 'Steps'],
   ['Fehler: ', 'Error: '],
   ['(Drücken)', '(Push)'],
