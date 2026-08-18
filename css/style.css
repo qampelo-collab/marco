@@ -231,6 +231,7 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .nav-item.active { color: var(--primary); }
 
 .hint.last { color: var(--muted); }
+.hint.pr-hint { font-weight: 700; }
 .row-item.static { cursor: default; }
 .record-val { font-weight: 700; color: var(--primary); font-size: 15px; }
 

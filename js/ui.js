@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v67';
+const APP_VERSION = 'v68';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -1076,9 +1076,35 @@ async function renderTraining() {
 
   const e1rmHint = h('div', { class: 'hint' }, '');
   const lastHint = h('div', { class: 'hint last' }, '');
+  const prHint = h('div', { class: 'hint pr-hint' }, '');
   function updateHint() {
     const v = e1rm(parseFloat(weightInp.value), parseInt(repsInp.value, 10), FORMULA);
     e1rmHint.textContent = v > 0 ? `≈ 1RM: ${round1(v)} kg` : '';
+  }
+  // Live-Radar: während der Eingabe zeigen, wie nah der gerade eingegebene
+  // Satz an einem persönlichen Rekord dran ist – motiviert schon beim Tippen,
+  // nicht erst nachträglich im Toast nach dem Speichern.
+  function updatePrHint() {
+    const exId = parseInt(exSel.value, 10);
+    const reps = parseInt(repsInp.value, 10);
+    if (!(reps > 0)) { prHint.textContent = ''; return; }
+    const weight = parseFloat(weightInp.value);
+    const exSetsAll = enriched.filter((s) => s.exerciseId === exId);
+    if (!(weight > 0)) {
+      // Körpergewichts-Übung: bisheriger Bestwert = meiste Wdh. in einem Satz.
+      const bestReps = exSetsAll.reduce((m, s) => (!(s.weight > 0) ? Math.max(m, s.reps || 0) : m), 0);
+      if (!bestReps) { prHint.textContent = ''; return; }
+      if (reps > bestReps) prHint.textContent = tr('🏆 Das wäre ein neuer Rekord!', '🏆 That would be a new record!');
+      else if (reps >= bestReps - 2) prHint.textContent = tr(`🔥 Noch ${bestReps - reps} Wdh. bis zum Rekord (${bestReps})`, `🔥 ${bestReps - reps} reps to the record (${bestReps})`);
+      else prHint.textContent = '';
+      return;
+    }
+    const best = bestE1rm(exSetsAll, FORMULA).value;
+    if (!best) { prHint.textContent = ''; return; }
+    const v = e1rm(weight, reps, FORMULA);
+    if (v > best) prHint.textContent = tr('🏆 Das wäre ein neuer Rekord!', '🏆 That would be a new record!');
+    else if (v >= best * 0.9) prHint.textContent = tr(`🔥 Nur ${round1(best - v)} kg (e1RM) bis zum Rekord (${best} kg)`, `🔥 Only ${round1(best - v)} kg (e1RM) to the record (${best} kg)`);
+    else prHint.textContent = '';
   }
   // Vorbefüllung: zuletzt benutzte Werte + Bestwert-Hinweis für die gewählte Übung.
   function prefillFromLast(overwrite) {
@@ -1094,10 +1120,11 @@ async function renderTraining() {
       lastHint.textContent = 'Noch keine Historie für diese Übung.';
     }
     updateHint();
+    updatePrHint();
   }
   exSel.addEventListener('change', () => prefillFromLast(true));
-  weightInp.addEventListener('input', updateHint);
-  repsInp.addEventListener('input', updateHint);
+  weightInp.addEventListener('input', () => { updateHint(); updatePrHint(); });
+  repsInp.addEventListener('input', () => { updateHint(); updatePrHint(); });
 
   // --- KI: Werte aus Foto lesen ---
   const aiResult = h('div', { class: 'hint' }, '');
@@ -1162,6 +1189,7 @@ async function renderTraining() {
       h('label', { class: 'field' }, h('span', {}, 'Wiederholungen'), repsInp),
     ),
     e1rmHint,
+    prHint,
     h('label', { class: 'field' }, h('span', {}, tr('Tendenz (optional)', 'Tendency (optional)')), addTend.el),
     h('label', { class: 'field' }, h('span', {}, '📷 Foto (optional – Display/Beleg)'), photoInp),
     preview,
