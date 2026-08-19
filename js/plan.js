@@ -18,7 +18,7 @@ export const PLAN = {
         { name: 'Kniebeugen',              cat: 'legs', scheme: '3×6-8',    rest: '120s' },
         { name: 'Rumänisches Kreuzheben',  cat: 'legs', scheme: '3×8-10',   rest: '90s' },
         { name: 'Seitheben',               cat: 'push', scheme: '2×12-15',  rest: '60s', note: 'Schwachstelle' },
-        { name: 'Trizepsdrücken',          cat: 'push', scheme: '2×10-12',  rest: '60s', note: 'Schwachstelle · Seilzug' },
+        { name: 'Reverse Flys',            cat: 'pull', scheme: '2×12-15',  rest: '60s', note: 'hintere Schulter' },
         { name: 'Plank',                   cat: 'core', scheme: '2×45-60s', rest: '45s' },
       ],
     },
