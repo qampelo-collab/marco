@@ -14,25 +14,29 @@ export function buildSuggestions({ enrichedSets, exercises, body, activity, form
   const now = Date.now();
   const byExercise = groupBy(enrichedSets, (s) => s.exerciseId);
 
-  // 1) Dysbalance Push/Pull (Verletzungsrisiko) — letzte 7 Tage.
-  const vol = weeklyVolumeByCategory(enrichedSets, 7);
+  // 1) Dysbalance Push/Pull (Verletzungsrisiko) — letzte 14 Tage (nicht 7:
+  //    bei einem Split mit fixen Wochentagen (z.B. Push Di, Pull Do) sieht ein
+  //    7-Tage-Fenster mitten in der Woche fast immer "zu wenig X" – die
+  //    passende Einheit war schlicht noch nicht dran, nicht vernachlässigt.
+  //    14 Tage decken auch mittwochs zuverlässig zwei komplette Zyklen ab.
+  const vol = weeklyVolumeByCategory(enrichedSets, 14);
   const push = vol.push || 0, pull = vol.pull || 0, legs = vol.legs || 0;
   if (pull > 0 && push > pull * 1.8) {
     cand.push({ p: 95, level: 'warn',
       title: pick('Dysbalance: zu wenig Pull', 'Imbalance: too little pull'),
-      text: pick('Diese Woche deutlich mehr Push- als Pull-Volumen – auf Dauer Schulterrisiko. Mehr Rudern/Klimmzüge.',
-        'Much more push than pull volume this week — shoulder risk over time. Add rows/pull-ups.') });
+      text: pick('In den letzten 2 Wochen deutlich mehr Push- als Pull-Volumen – auf Dauer Schulterrisiko. Mehr Rudern/Klimmzüge.',
+        'Much more push than pull volume over the last 2 weeks — shoulder risk over time. Add rows/pull-ups.') });
   } else if (push > 0 && pull > push * 1.8) {
     cand.push({ p: 90, level: 'warn',
       title: pick('Dysbalance: zu wenig Push', 'Imbalance: too little push'),
-      text: pick('Pull dominiert klar. Ein zusätzlicher Push-Tag bringt die Balance zurück.',
-        'Pull clearly dominates. An extra push day restores balance.') });
+      text: pick('Pull dominiert klar in den letzten 2 Wochen. Ein zusätzlicher Push-Tag bringt die Balance zurück.',
+        'Pull clearly dominates over the last 2 weeks. An extra push day restores balance.') });
   }
   if (push + pull > 0 && legs < (push + pull) * 0.3) {
     cand.push({ p: 70, level: 'tip',
       title: pick('Legs vernachlässigt', 'Legs neglected'),
-      text: pick('Bein-Volumen niedrig gegenüber dem Oberkörper. Squats/Kreuzheben einplanen.',
-        'Leg volume low vs. upper body. Add squats/deadlifts.') });
+      text: pick('Bein-Volumen niedrig gegenüber dem Oberkörper (letzte 2 Wochen). Squats/Kreuzheben einplanen.',
+        'Leg volume low vs. upper body (last 2 weeks). Add squats/deadlifts.') });
   }
 
   // 2) Rückgang oder Plateau — nur der auffälligste Lift. Für gewichtsbasierte
