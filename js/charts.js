@@ -90,6 +90,49 @@ export function progressRing(value, max, { size = 120, color = '#4ade80', trackC
 }
 
 // Balkendiagramm für Kategorien: data = [{label, value, color?}]
+// Gestapeltes Balkendiagramm: data = [{label, segments: [{value, color}, ...]}]
+// (Segmente werden von unten nach oben in der angegebenen Reihenfolge
+// gestapelt, z.B. für "bewegtes Gewicht pro Woche nach Kategorie").
+export function stackedBarChart(data, { width = 320, height = 160 } = {}) {
+  const svg = ns('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', height: 'auto',
+    class: 'chart', preserveAspectRatio: 'xMidYMid meet' });
+  if (!data || data.length === 0) {
+    const t = ns('text', { x: width / 2, y: height / 2, 'text-anchor': 'middle', fill: '#94a3b8', 'font-size': '12' });
+    t.textContent = 'Noch keine Daten';
+    svg.appendChild(t);
+    return svg;
+  }
+  const pad = { l: 10, r: 10, t: 12, b: 28 };
+  const w = width - pad.l - pad.r;
+  const h = height - pad.t - pad.b;
+  const totals = data.map((d) => d.segments.reduce((sum, seg) => sum + (seg.value || 0), 0));
+  const max = Math.max(...totals, 1);
+  const bw = w / data.length * 0.6;
+  const gap = w / data.length;
+
+  data.forEach((d, i) => {
+    const total = totals[i];
+    const bx = pad.l + i * gap + (gap - bw) / 2;
+    let yCursor = pad.t + h;
+    for (const seg of d.segments) {
+      if (!(seg.value > 0)) continue;
+      const segH = (seg.value / max) * h;
+      const by = yCursor - segH;
+      svg.appendChild(ns('rect', { x: bx, y: by, width: bw, height: segH, fill: seg.color || '#4ade80' }));
+      yCursor = by;
+    }
+    const lbl = ns('text', { x: bx + bw / 2, y: height - 14, 'text-anchor': 'middle', fill: '#94a3b8', 'font-size': '10' });
+    lbl.textContent = d.label;
+    svg.appendChild(lbl);
+    if (total > 0) {
+      const val = ns('text', { x: bx + bw / 2, y: pad.t + h - (total / max) * h - 3, 'text-anchor': 'middle', fill: '#e2e8f0', 'font-size': '9' });
+      val.textContent = Math.round(total);
+      svg.appendChild(val);
+    }
+  });
+  return svg;
+}
+
 export function barChart(data, { width = 320, height = 160 } = {}) {
   const svg = ns('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', height: 'auto',
     class: 'chart', preserveAspectRatio: 'xMidYMid meet' });

@@ -3,7 +3,7 @@
 import { db, exportAll, importAll } from './db.js';
 import { e1rm, progression, dayKey, round1, bestE1rm, navyBodyFat, weightForReps, roundToStep, totalVolume } from './calc.js';
 import { buildSuggestions } from './coach.js';
-import { lineChart, barChart, progressRing } from './charts.js';
+import { lineChart, stackedBarChart, progressRing } from './charts.js';
 import { extractSetsFromImage, VISION_MODELS, DEFAULT_VISION_MODEL } from './vision.js';
 import { PLAN, installPlan, parseTargetSets } from './plan.js';
 import { applyTheme, ACCENTS, DEFAULT_ACCENT, DEFAULT_THEME, THEME_MODES } from './theme.js';
@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v71';
+const APP_VERSION = 'v72';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -96,20 +96,29 @@ function computeStreak(dateStrings, goal) {
 
 // Bewegtes Gesamtgewicht (kg) je Woche für die letzten `weeks` Wochen
 // (inkl. laufender Woche), als Balkendiagramm-Daten [{label, value}].
+// Bewegtes Gewicht pro Woche, aufgeschlüsselt nach Kategorie (Push/Pull/
+// Legs/Core/Sonstige) – zeigt nicht nur "wie viel", sondern auch "womit"
+// die Tonnage in der jeweiligen Woche zustande kam.
 function weeklyTonnageSeries(enrichedSets, weeks = 10) {
   const start = mondayOf(new Date());
   const buckets = [];
   for (let i = weeks - 1; i >= 0; i--) {
     const d = new Date(start); d.setDate(d.getDate() - i * 7);
-    buckets.push({ key: d.toISOString().slice(0, 10), label: `${d.getDate()}.${d.getMonth() + 1}.`, value: 0 });
+    buckets.push({ key: d.toISOString().slice(0, 10), label: `${d.getDate()}.${d.getMonth() + 1}.`, byCat: {} });
   }
   const idx = new Map(buckets.map((b, i) => [b.key, i]));
   for (const s of enrichedSets) {
     if (!s.date) continue;
     const i = idx.get(weekKey(s.date));
-    if (i != null) buckets[i].value += (s.weight || 0) * (s.reps || 0);
+    if (i == null) continue;
+    const cat = s.category || 'sonstige';
+    buckets[i].byCat[cat] = (buckets[i].byCat[cat] || 0) + (s.weight || 0) * (s.reps || 0);
   }
-  return buckets.map((b) => ({ label: b.label, value: Math.round(b.value) }));
+  return buckets.map((b) => ({
+    label: b.label,
+    byCat: b.byCat,
+    value: Math.round(Object.values(b.byCat).reduce((sum, v) => sum + v, 0)),
+  }));
 }
 
 // Durchschnittliches Körpergewicht je Woche, gleicher 10-Wochen-Zeitraum wie
@@ -457,14 +466,26 @@ async function renderDashboard() {
         h('div', { class: 'sug-title' }, title), h('div', { class: 'sug-text' }, text))));
   }
 
-  // 📊 Bewegtes Gewicht pro Woche (letzte 10 Wochen) + ⚖️ Ø Körpergewicht im
-  // selben Zeitraum darunter, damit direkt sichtbar ist, ob die Tonnage trotz
-  // Cut (sinkendem Körpergewicht) weiter steigt.
+  // 📊 Bewegtes Gewicht pro Woche (letzte 10 Wochen), gestapelt nach Kategorie
+  // (Push/Pull/Legs/Core) + ⚖️ Ø Körpergewicht im selben Zeitraum darunter,
+  // damit direkt sichtbar ist, ob die Tonnage trotz Cut (sinkendem
+  // Körpergewicht) weiter steigt UND ob der Anstieg von allen Kategorien
+  // getragen wird oder nur von einer.
   const tonnageSeries = weeklyTonnageSeries(enriched, 10);
   if (tonnageSeries.some((b) => b.value > 0)) {
+    const catOrder = ['push', 'pull', 'legs', 'core', 'sonstige'];
+    const usedCats = catOrder.filter((c) => tonnageSeries.some((b) => (b.byCat[c] || 0) > 0));
+    const stackedData = tonnageSeries.map((b) => ({
+      label: b.label,
+      segments: usedCats.map((c) => ({ value: b.byCat[c] || 0, color: CAT_COLOR[c] })),
+    }));
+    const legend = h('div', { class: 'chart-legend' },
+      ...usedCats.map((c) => h('span', { class: 'legend-item' },
+        h('span', { class: 'dot', style: `background:${CAT_COLOR[c]}` }), CAT_LABEL[c] || c)));
     wrap.appendChild(h('div', { class: 'card' },
       h('h2', {}, '📊 ' + tr('Bewegtes Gewicht pro Woche', 'Weight moved per week')),
-      barChart(tonnageSeries.map((b) => ({ ...b, color: ringColor }))),
+      legend,
+      stackedBarChart(stackedData),
     ));
     const bwSeries = weeklyBodyweightSeries(body, 10);
     if (bwSeries.length >= 2) {
