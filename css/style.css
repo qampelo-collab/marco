@@ -106,6 +106,7 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .suggestion.tip  { border-color: #60a5fa; }
 .suggestion.good { border-color: var(--primary); }
 .suggestion.info { border-color: var(--muted); }
+.suggestion.clickable { cursor: pointer; }
 .sug-title { font-weight: 600; margin-bottom: 2px; }
 .sug-text { font-size: 13px; color: var(--muted); line-height: 1.4; }
 
@@ -260,6 +261,10 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .rest-timer .rt-label { font-weight: 700; color: var(--muted); font-size: 13px; }
 .rest-timer .rt-x { background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
 .rest-timer .rt-time { font-size: 46px; font-weight: 800; line-height: 1.1; color: var(--primary); }
+/* Im "fertig"-Zustand steht hier ein Text (z.B. "🔔 Timer fertig!") statt
+   einer kurzen Ziffernanzeige – bei 46px würde der umbrechen und die Box
+   sprengen, darum hier deutlich kleiner. */
+.rest-timer.done .rt-time { font-size: 22px; line-height: 1.3; }
 .rest-timer .rt-bar { height: 8px; background: var(--bg-elev); border-radius: 999px; overflow: hidden; margin: 10px 0; }
 .rest-timer .rt-bar > i { display: block; height: 100%; background: var(--primary); width: 100%; transition: width .2s linear; }
 .rest-timer .rt-actions { display: flex; gap: 8px; }

@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v70';
+const APP_VERSION = 'v71';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -371,8 +371,8 @@ function mainLiftRow(ex, ss) {
 function lastRecordInfo(enrichedSets, formula) {
   const byEx = new Map();
   for (const s of enrichedSets) { if (!byEx.has(s.exerciseId)) byEx.set(s.exerciseId, []); byEx.get(s.exerciseId).push(s); }
-  let latest = null; // {date, name, kind, value, setWeight, setReps}
-  for (const [, sets] of byEx) {
+  let latest = null; // {date, name, kind, value, setWeight, setReps, exerciseId}
+  for (const [exId, sets] of byEx) {
     const name = sets[0]?.exerciseName || tr('Übung', 'exercise');
     const bodyweight = sets.every((s) => !(s.weight > 0)) && sets.some((s) => s.reps > 0);
     if (bodyweight) {
@@ -382,7 +382,7 @@ function lastRecordInfo(enrichedSets, formula) {
       for (const [date, total] of [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
         if (total > best) {
           best = total;
-          if (!latest || date >= latest.date) latest = { date, name, kind: 'bodyweight', value: total };
+          if (!latest || date >= latest.date) latest = { date, name, kind: 'bodyweight', value: total, exerciseId: exId };
         }
       }
     } else {
@@ -393,7 +393,7 @@ function lastRecordInfo(enrichedSets, formula) {
         const v = e1rm(s.weight, s.reps, formula);
         if (v > best + 0.01) {
           best = v;
-          if (!latest || s.date >= latest.date) latest = { date: s.date, name, kind: 'weight', value: round1(v), setWeight: s.weight, setReps: s.reps };
+          if (!latest || s.date >= latest.date) latest = { date: s.date, name, kind: 'weight', value: round1(v), setWeight: s.weight, setReps: s.reps, exerciseId: exId };
         }
       }
     }
@@ -453,7 +453,8 @@ async function renderDashboard() {
       : tr(`Zuletzt: ${rec.name} mit ${valueText} am ${fmtDate(rec.date)}. Zeit, eine Übung anzugreifen.`,
            `Last one: ${rec.name} with ${valueText} on ${fmtDate(rec.date)}. Time to go attack a lift.`);
     wrap.appendChild(h('div', { class: 'card' },
-      h('div', { class: 'suggestion ' + level }, h('div', { class: 'sug-title' }, title), h('div', { class: 'sug-text' }, text))));
+      h('div', { class: 'suggestion ' + level + ' clickable', onclick: () => go('#uebungen?id=' + rec.exerciseId) },
+        h('div', { class: 'sug-title' }, title), h('div', { class: 'sug-text' }, text))));
   }
 
   // 📊 Bewegtes Gewicht pro Woche (letzte 10 Wochen) + ⚖️ Ø Körpergewicht im
@@ -571,8 +572,9 @@ async function renderDashboard() {
   }
 
   // Rekorde: gewichtsbasiert (bestes 1RM) + Körpergewicht (meiste Wdh./Einheit)
+  // — anklickbar, um direkt zur Historie der Übung zu springen.
   const weightedRecords = [...byExercise.entries()]
-    .map(([id, sets]) => ({ name: sets[0].exerciseName, ...bestE1rm(sets, FORMULA) }))
+    .map(([id, sets]) => ({ id, name: sets[0].exerciseName, ...bestE1rm(sets, FORMULA) }))
     .filter((r) => r.value > 0)
     .sort((a, b) => b.value - a.value)
     .slice(0, 6);
@@ -583,7 +585,7 @@ async function renderDashboard() {
       const rp = repsProgression(sets);
       let bestSet = null;
       for (const s of sets) { if (s.reps > 0 && (!bestSet || s.reps > bestSet.reps)) bestSet = s; }
-      return { name: sets[0].exerciseName, totalBest: rp.best, bestSet };
+      return { id, name: sets[0].exerciseName, totalBest: rp.best, bestSet };
     })
     .filter((r) => r && r.totalBest > 0)
     .sort((a, b) => b.totalBest - a.totalBest)
@@ -592,17 +594,19 @@ async function renderDashboard() {
   if (weightedRecords.length || bwRecords.length) {
     const card = h('div', { class: 'card' }, h('h2', {}, '🏆 ' + tr('Rekorde', 'Records')));
     for (const r of weightedRecords) {
-      card.appendChild(h('div', { class: 'row-item static' },
+      card.appendChild(h('div', { class: 'row-item', onclick: () => go('#uebungen?id=' + r.id) },
         h('div', {}, h('strong', {}, r.name),
           r.set ? h('div', { class: 'muted small' }, `${r.set.weight} kg × ${r.set.reps} · ${fmtDate(r.set.date)}`) : null),
         h('span', { class: 'record-val' }, r.value + ' kg'),
+        h('span', { class: 'chev' }, '›'),
       ));
     }
     for (const r of bwRecords) {
-      card.appendChild(h('div', { class: 'row-item static' },
+      card.appendChild(h('div', { class: 'row-item', onclick: () => go('#uebungen?id=' + r.id) },
         h('div', {}, h('strong', {}, r.name),
           r.bestSet ? h('div', { class: 'muted small' }, `${tr('bester Satz', 'best set')} ${r.bestSet.reps} ${tr('Wdh.', 'reps')} · ${fmtDate(r.bestSet.date)}`) : null),
         h('span', { class: 'record-val' }, r.totalBest + ' ' + tr('Wdh.', 'reps')),
+        h('span', { class: 'chev' }, '›'),
       ));
     }
     wrap.appendChild(card);
@@ -875,8 +879,8 @@ async function renderTraining() {
     ));
 
     // ============ Freier Timer (ohne Übungsbezug) ============
-    const ftCustom = h('input', { type: 'number', step: '5', min: '5', inputmode: 'numeric', class: 'inp',
-      value: defaultRest, placeholder: tr('Sekunden', 'seconds') });
+    const ftCustom = selectOnFocus(h('input', { type: 'text', inputmode: 'numeric', class: 'inp',
+      value: defaultRest, placeholder: tr('Sekunden', 'seconds') }));
     const ftChip = (sec) => h('button', { class: 'btn ghost small', onclick: () => startFreeTimer(sec) }, fmtSec(sec));
     function startFreeTimer(sec) {
       if (!(sec > 0)) return;
@@ -886,11 +890,9 @@ async function renderTraining() {
       h('h2', {}, tr('⏱ Freier Timer', '⏱ Free timer')),
       h('p', { class: 'muted small' }, tr('Einfach eine Pause stoppen, ganz ohne Training zu erfassen.', 'Just time a break, without logging any training.')),
       h('div', { class: 'seg', style: 'flex-wrap:wrap' }, ftChip(30), ftChip(60), ftChip(90), ftChip(120), ftChip(180)),
-      h('div', { class: 'field-row', style: 'margin-top:10px' },
-        h('label', { class: 'field' }, h('span', {}, tr('Eigene Dauer (Sek.)', 'Custom duration (sec)')), ftCustom),
-        h('button', { class: 'btn primary', style: 'align-self:flex-end', onclick: () => startFreeTimer(parseInt(ftCustom.value, 10)) },
-          tr('▶ Start', '▶ Start')),
-      ),
+      h('label', { class: 'field', style: 'margin-top:10px' }, h('span', {}, tr('Eigene Dauer (Sek.)', 'Custom duration (sec)')), ftCustom),
+      h('button', { class: 'btn primary', onclick: () => startFreeTimer(parseInt(ftCustom.value, 10)) },
+        tr('▶ Start', '▶ Start')),
     ));
 
     // ============ AUSNAHME: manuell erfassen (eingeklappt) ============
@@ -1617,16 +1619,37 @@ async function renderExerciseDetail(id) {
           ex.name = nm; ex.category = catE.value; ex.equipment = equipE.value.trim();
           const rv = parseInt(restI.value, 10); ex.rest = rv > 0 ? rv : null;
           await db.put('exercises', ex);
+          // Trainingspläne speichern den Übungsnamen als eigene Kopie (nicht
+          // live verknüpft) – bei Umbenennung sonst dort stehender alter Name.
+          const tplsRen = await db.all('templates');
+          for (const t of tplsRen) {
+            let changed = false;
+            for (const it of (t.items || [])) {
+              if (it.exerciseId === id && it.exerciseName !== nm) { it.exerciseName = nm; changed = true; }
+            }
+            if (changed) await db.put('templates', t);
+          }
           toast(tr('Gespeichert ✓', 'Saved ✓'));
           route();
         } }, tr('✓ Speichern', '✓ Save')),
         h('button', { class: 'btn ghost danger', onclick: async () => {
           const n = sets.length;
-          const msg = n
+          const tplsDel = await db.all('templates');
+          const usedIn = tplsDel.filter((t) => (t.items || []).some((it) => it.exerciseId === id));
+          let msg = n
             ? tr(`„${ex.name}" und ${n} zugehörige Sätze löschen?`, `Delete “${ex.name}” and its ${n} sets?`)
             : tr(`„${ex.name}" löschen?`, `Delete “${ex.name}”?`);
+          if (usedIn.length) {
+            const names = usedIn.map((t) => t.name).join(', ');
+            msg += tr(`\n\nWird auch aus deinem Trainingsplan entfernt (${names}).`,
+              `\n\nWill also be removed from your training plan (${names}).`);
+          }
           if (!confirm(msg)) return;
           if (n) { const all = await db.byIndex('sets', 'exerciseId', id); for (const s of all) await db.delete('sets', s.id); }
+          for (const t of usedIn) {
+            t.items = (t.items || []).filter((it) => it.exerciseId !== id);
+            await db.put('templates', t);
+          }
           await db.delete('exercises', id);
           location.hash = '#uebungen'; route();
         } }, tr('🗑 Übung löschen', '🗑 Delete exercise')),
