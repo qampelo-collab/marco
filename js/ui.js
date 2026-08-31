@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v75';
+const APP_VERSION = 'v76';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -171,6 +171,23 @@ function sessionKey(name) {
   const tokens = (name || '').toLowerCase().match(/[a-zà-ÿ0-9]+/g);
   if (!tokens) return '';
   return tokens.map((w) => (w.endsWith('s') && w.length > 3 ? w.slice(0, -1) : w)).sort().join(' ');
+}
+
+// Trainingstyp aus einem Namen erkennen, unabhängig vom Rest des Texts.
+// Nötig, weil derselbe Trainingstag ganz unterschiedlich benannt sein kann:
+// aus Fotos kommt oft nur ein kurzes "PUSH"/"Push", beim Start aus dem Plan
+// dagegen der volle Titel "Di – Push (~42 Min)". sessionKey() (Wortmenge)
+// matcht diese beiden Formen NICHT, weil die Wortanzahl unterschiedlich ist –
+// für den Direktvergleich zählt aber nur "ist es ein Push-Tag", nicht der
+// exakte Titel. "upper" fängt alte, noch nicht umbenannte "Upper #2"/"UPPER"-
+// Einheiten als Vorgänger von "Finisher" mit ab.
+function dayTypeOf(name) {
+  const s = (name || '').toLowerCase();
+  if (/legs/.test(s)) return 'legs';
+  if (/push/.test(s)) return 'push';
+  if (/pull/.test(s)) return 'pull';
+  if (/finisher|upper/.test(s)) return 'finisher';
+  return sessionKey(name);
 }
 
 // Wochentag-Kürzel aus "YYYY-MM-DD".
@@ -702,17 +719,22 @@ async function computeSessionSummary(workoutId) {
 
   // Volumen ggü. letzter Einheit mit demselben Tagesnamen (z.B. "Mi – Legs+ ...")
   // + direkter Satz-für-Satz-Vergleich je Übung (Push gegen Push, Pull gegen Pull, ...).
-  // Namen wie über sessionKey() vergleichen (nicht per ===): sonst verpasst der
-  // Vergleich die eigentlich letzte gleichartige Einheit, sobald der Name mal
-  // anders geschrieben/großgeschrieben wurde (z.B. "PUSH" vs. "Push").
+  // Namen über dayTypeOf() vergleichen (nicht per === oder sessionKey()):
+  // Trainingsnamen kommen aus zwei sehr unterschiedlichen Quellen – Fotos
+  // liefern kurze Tagesnamen wie "PUSH"/"Push", der Plan-Start dagegen den
+  // vollen Titel "Di – Push (~42 Min)". sessionKey() allein matcht diese
+  // beiden Formen NICHT (unterschiedliche Wortanzahl), wodurch der Vergleich
+  // eine ältere, zufällig gleich formatierte Einheit erwischte statt der
+  // wirklich letzten. dayTypeOf() erkennt stattdessen das gemeinsame
+  // Schlüsselwort (push/pull/legs/...) unabhängig vom Rest des Textes.
   const label = workout.templateName || workout.notes || null;
-  const labelKey = sessionKey(label);
+  const labelKey = dayTypeOf(label);
   const thisVolume = totalVolume(sessionSets);
   let volumeCompare = null;
   let comparison = null;
   if (labelKey) {
     const prevWorkout = workouts
-      .filter((w) => w.id !== workoutId && sessionKey(w.templateName || w.notes) === labelKey)
+      .filter((w) => w.id !== workoutId && dayTypeOf(w.templateName || w.notes) === labelKey)
       .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.id - a.id))[0];
     if (prevWorkout) {
       const prevWorkoutSets = enriched.filter((s) => s.workoutId === prevWorkout.id);
@@ -728,8 +750,13 @@ async function computeSessionSummary(workoutId) {
           const bodyweight = enriched.filter((s) => s.exerciseId === exId).every((s) => !(s.weight > 0)) && sSets.some((s) => s.reps > 0);
           const thisSets = [...sSets].sort(byTs).map((s) => ({ weight: s.weight, reps: s.reps }));
           const prevSets = [...(prevByEx.get(exId) || [])].sort(byTs).map((s) => ({ weight: s.weight, reps: s.reps }));
-          const thisTotal = bodyweight ? thisSets.reduce((sum, x) => sum + x.reps, 0) : totalVolume(thisSets);
-          const prevTotal = bodyweight ? prevSets.reduce((sum, x) => sum + x.reps, 0) : totalVolume(prevSets);
+          // Kennzahl je Übung bewusst wie überall sonst in der App (Rekorde,
+          // Fortschritt): bestes e1RM statt Gesamtvolumen. Rohes Tonnage-Delta
+          // (Gewicht×Wdh. summiert) wirkte neben fast identischen Sätzen wie
+          // "70kg×7 vs. 70kg×6" absurd groß (z.B. "+125 kg") und ließ sich
+          // leicht mit einer Gewichtsänderung verwechseln.
+          const thisTotal = bodyweight ? thisSets.reduce((sum, x) => sum + x.reps, 0) : bestE1rm(thisSets, FORMULA).value;
+          const prevTotal = bodyweight ? prevSets.reduce((sum, x) => sum + x.reps, 0) : bestE1rm(prevSets, FORMULA).value;
           return { name: sSets[0].exerciseName, bodyweight, thisSets, prevSets, thisTotal: round1(thisTotal), prevTotal: round1(prevTotal) };
         }),
       };
@@ -812,7 +839,9 @@ function renderSessionSummary(s, { fresh = true } = {}) {
     const card = h('div', { class: 'card' }, h('h2', {}, '🔁 ' + tr('Direktvergleich', 'Direct comparison')),
       h('p', { class: 'muted small' }, tr(`Gegen ${s.label} vom ${fmtDate(s.comparison.prevDate)}`, `Vs. ${s.label} on ${fmtDate(s.comparison.prevDate)}`)));
     for (const r of s.comparison.rows) {
-      const unit = r.bodyweight ? tr('Wdh.', 'reps') : 'kg';
+      // Kennzahl je Übung wie im Rest der App: bestes e1RM (nicht Gesamtvolumen,
+      // sonst wirkt das Delta neben fast identischen Sätzen unplausibel groß).
+      const unit = r.bodyweight ? tr('Wdh. gesamt', 'reps total') : 'kg (e1RM)';
       const hasPrev = r.prevSets.length > 0;
       const deltaAbs = round1(r.thisTotal - r.prevTotal);
       const deltaBadge = hasPrev
