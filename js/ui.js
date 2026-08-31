@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v73';
+const APP_VERSION = 'v74';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -745,10 +745,11 @@ function setsText(sets, bodyweight) {
   return sets.map((x) => `${x.weight}kg×${x.reps}`).join(' · ');
 }
 
-function renderSessionSummary(s) {
+function renderSessionSummary(s, { fresh = true } = {}) {
   const wrap = h('div', { class: 'view' });
   const dateLabel = `${weekdayShort(s.workout.date)}, ${fmtDate(s.workout.date)}`;
-  wrap.appendChild(h('h1', {}, '✅ ' + tr('Einheit gespeichert', 'Session saved')));
+  if (!fresh) wrap.appendChild(h('a', { class: 'back', href: '#einheiten' }, tr('‹ Zurück zum Verlauf', '‹ Back to history')));
+  wrap.appendChild(h('h1', {}, fresh ? '✅ ' + tr('Einheit gespeichert', 'Session saved') : '🔁 ' + tr('Trainingsvergleich', 'Session comparison')));
   wrap.appendChild(h('p', { class: 'muted' }, (s.label ? s.label + ' · ' : '') + dateLabel));
 
   // Kopfzeile: kurzer Motivationssatz je nach Ergebnis.
@@ -828,7 +829,9 @@ function renderSessionSummary(s) {
   wrap.appendChild(h('div', { class: 'card' }, h('h2', {}, '🔥 ' + tr('Wochenziel', 'Weekly goal')),
     h('p', {}, tr(`${s.curCount} von ${s.goal} Einheiten diese Woche`, `${s.curCount} of ${s.goal} sessions this week`))));
 
-  wrap.appendChild(h('button', { class: 'btn primary big-pause', onclick: () => go('#dashboard') }, tr('Weiter zur Übersicht', 'Continue to overview')));
+  wrap.appendChild(fresh
+    ? h('button', { class: 'btn primary big-pause', onclick: () => go('#dashboard') }, tr('Weiter zur Übersicht', 'Continue to overview'))
+    : h('button', { class: 'btn ghost big-pause', onclick: () => go('#einheiten') }, tr('‹ Zurück zum Verlauf', '‹ Back to history')));
   return wrap;
 }
 
@@ -838,12 +841,14 @@ function renderSessionSummary(s) {
 async function renderTraining() {
   setRestDoneCallback(null);   // wird in einer offenen Einheit unten gesetzt
 
-  // Abschlussbildschirm nach dem Speichern/Beenden einer Einheit (#training?review=<id>).
+  // Abschlussbildschirm nach dem Speichern/Beenden einer Einheit
+  // (#training?review=<id>), oder derselbe Vergleich später erneut aus dem
+  // Verlauf aufgerufen (#training?review=<id>&mode=compare).
   const reviewParams = new URLSearchParams(location.hash.split('?')[1] || '');
   const reviewId = reviewParams.get('review');
   if (reviewId) {
     const summary = await computeSessionSummary(parseInt(reviewId, 10));
-    if (summary) return renderSessionSummary(summary);
+    if (summary) return renderSessionSummary(summary, { fresh: reviewParams.get('mode') !== 'compare' });
   }
 
   const { enriched, workouts: allWorkouts, exercises } = await loadEnrichedSets();
@@ -1527,6 +1532,10 @@ async function renderHistory() {
         h('div', { class: 'cat-dots' }, ...dots),
       ),
       h('div', { class: 'row-actions' },
+        h('button', { class: 'btn ghost small', title: tr('Vergleich zur vorherigen gleichen Einheit', 'Comparison to the previous session of this type'), onclick: (e) => {
+          e.stopPropagation();
+          go('#training?review=' + w.id + '&mode=compare');
+        } }, '🔁'),
         h('button', { class: 'btn ghost small danger', onclick: async (e) => {
           e.stopPropagation();
           const q = tr(`Einheit vom ${fmtDate(w.date)} inkl. aller ${a.sets} Sätze löschen?`,
