@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v72';
+const APP_VERSION = 'v73';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -700,24 +700,49 @@ async function computeSessionSummary(workoutId) {
   records.sort((a, b) => a.name.localeCompare(b.name));
   nearMisses.sort((a, b) => a.name.localeCompare(b.name));
 
-  // Volumen ggü. letzter Einheit mit demselben Tagesnamen (z.B. "Mi – Legs+ ...").
+  // Volumen ggü. letzter Einheit mit demselben Tagesnamen (z.B. "Mi – Legs+ ...")
+  // + direkter Satz-für-Satz-Vergleich je Übung (Push gegen Push, Pull gegen Pull, ...).
   const label = workout.templateName || workout.notes || null;
   const thisVolume = totalVolume(sessionSets);
   let volumeCompare = null;
+  let comparison = null;
   if (label) {
-    const prevWorkouts = workouts
+    const prevWorkout = workouts
       .filter((w) => w.id !== workoutId && (w.templateName || w.notes) === label)
-      .sort((a, b) => b.date.localeCompare(a.date));
-    if (prevWorkouts[0]) {
-      const prevVolume = totalVolume(enriched.filter((s) => s.workoutId === prevWorkouts[0].id));
+      .sort((a, b) => b.date.localeCompare(a.date))[0];
+    if (prevWorkout) {
+      const prevWorkoutSets = enriched.filter((s) => s.workoutId === prevWorkout.id);
+      const prevVolume = totalVolume(prevWorkoutSets);
       if (prevVolume > 0) volumeCompare = { prevVolume: round1(prevVolume), deltaPct: round1(((thisVolume - prevVolume) / prevVolume) * 100) };
+
+      const prevByEx = new Map();
+      for (const s of prevWorkoutSets) { if (!prevByEx.has(s.exerciseId)) prevByEx.set(s.exerciseId, []); prevByEx.get(s.exerciseId).push(s); }
+      const byTs = (a, b) => (a.ts || 0) - (b.ts || 0);
+      comparison = {
+        prevDate: prevWorkout.date,
+        rows: [...byEx.entries()].map(([exId, sSets]) => {
+          const bodyweight = enriched.filter((s) => s.exerciseId === exId).every((s) => !(s.weight > 0)) && sSets.some((s) => s.reps > 0);
+          const thisSets = [...sSets].sort(byTs).map((s) => ({ weight: s.weight, reps: s.reps }));
+          const prevSets = [...(prevByEx.get(exId) || [])].sort(byTs).map((s) => ({ weight: s.weight, reps: s.reps }));
+          const thisTotal = bodyweight ? thisSets.reduce((sum, x) => sum + x.reps, 0) : totalVolume(thisSets);
+          const prevTotal = bodyweight ? prevSets.reduce((sum, x) => sum + x.reps, 0) : totalVolume(prevSets);
+          return { name: sSets[0].exerciseName, bodyweight, thisSets, prevSets, thisTotal: round1(thisTotal), prevTotal: round1(prevTotal) };
+        }),
+      };
     }
   }
 
   const goal = await getWeeklyGoal();
   const { curCount } = computeStreak(workouts.map((w) => w.date), goal);
 
-  return { workout, label, sessionSets, exCount: byEx.size, thisVolume: round1(thisVolume), records, nearMisses, volumeCompare, curCount, goal };
+  return { workout, label, sessionSets, exCount: byEx.size, thisVolume: round1(thisVolume), records, nearMisses, volumeCompare, comparison, curCount, goal };
+}
+
+// Sätze einer Übung kompakt als Text, für den Direktvergleich im Abschlussbildschirm.
+function setsText(sets, bodyweight) {
+  if (!sets.length) return '';
+  if (bodyweight) return sets.map((x) => x.reps).join(' · ') + ' ' + tr('Wdh.', 'reps');
+  return sets.map((x) => `${x.weight}kg×${x.reps}`).join(' · ');
 }
 
 function renderSessionSummary(s) {
@@ -774,6 +799,30 @@ function renderSessionSummary(s) {
     wrap.appendChild(h('div', { class: 'card' }, h('h2', {}, '📊 ' + tr('Volumen ggü. letztem Mal', 'Volume vs. last time')),
       h('p', {}, `${s.thisVolume.toLocaleString('de-DE')} kg `, h('span', { style: d >= 0 ? 'color:var(--primary)' : 'color:var(--danger)' }, `(${sign}${d}%)`)),
       h('p', { class: 'muted small' }, tr(`letztes Mal: ${s.volumeCompare.prevVolume.toLocaleString('de-DE')} kg`, `last time: ${s.volumeCompare.prevVolume.toLocaleString('en-US')} kg`))));
+  }
+
+  // 🔁 Direktvergleich Satz für Satz je Übung, gegen die letzte Einheit mit
+  // demselben Tagesnamen (Push gegen Push, Pull gegen Pull, ...).
+  if (s.comparison && s.comparison.rows.length) {
+    const card = h('div', { class: 'card' }, h('h2', {}, '🔁 ' + tr('Direktvergleich', 'Direct comparison')),
+      h('p', { class: 'muted small' }, tr(`Gegen ${s.label} vom ${fmtDate(s.comparison.prevDate)}`, `Vs. ${s.label} on ${fmtDate(s.comparison.prevDate)}`)));
+    for (const r of s.comparison.rows) {
+      const unit = r.bodyweight ? tr('Wdh.', 'reps') : 'kg';
+      const hasPrev = r.prevSets.length > 0;
+      const deltaAbs = round1(r.thisTotal - r.prevTotal);
+      const deltaBadge = hasPrev
+        ? h('span', { style: deltaAbs >= 0 ? 'color:var(--primary)' : 'color:var(--danger)' },
+            (deltaAbs >= 0 ? '+' : '') + deltaAbs + ' ' + unit)
+        : h('span', { class: 'muted small' }, tr('neu', 'new'));
+      card.appendChild(h('div', { class: 'chart-block' },
+        h('div', { class: 'chart-head' }, h('span', {}, r.name), deltaBadge),
+        h('div', { class: 'muted small' }, tr('Diesmal: ', 'This time: ') + setsText(r.thisSets, r.bodyweight)),
+        h('div', { class: 'muted small' }, hasPrev
+          ? tr('Letztes Mal: ', 'Last time: ') + setsText(r.prevSets, r.bodyweight)
+          : tr('Letztes Mal: noch nicht trainiert', 'Last time: not trained yet')),
+      ));
+    }
+    wrap.appendChild(card);
   }
 
   wrap.appendChild(h('div', { class: 'card' }, h('h2', {}, '🔥 ' + tr('Wochenziel', 'Weekly goal')),
