@@ -17,7 +17,7 @@ let FORMULA = 'epley';
 
 // App-Version — muss mit dem CACHE-Namen in sw.js übereinstimmen.
 // Wird unter „Mehr" angezeigt, damit man sieht, ob die neueste Version läuft.
-const APP_VERSION = 'v74';
+const APP_VERSION = 'v75';
 
 const CAT_LABEL = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core', sonstige: 'Sonstige' };
 const CAT_COLOR = { push: '#60a5fa', pull: '#f472b6', legs: '#4ade80', core: '#fbbf24', sonstige: '#94a3b8' };
@@ -702,14 +702,18 @@ async function computeSessionSummary(workoutId) {
 
   // Volumen ggü. letzter Einheit mit demselben Tagesnamen (z.B. "Mi – Legs+ ...")
   // + direkter Satz-für-Satz-Vergleich je Übung (Push gegen Push, Pull gegen Pull, ...).
+  // Namen wie über sessionKey() vergleichen (nicht per ===): sonst verpasst der
+  // Vergleich die eigentlich letzte gleichartige Einheit, sobald der Name mal
+  // anders geschrieben/großgeschrieben wurde (z.B. "PUSH" vs. "Push").
   const label = workout.templateName || workout.notes || null;
+  const labelKey = sessionKey(label);
   const thisVolume = totalVolume(sessionSets);
   let volumeCompare = null;
   let comparison = null;
-  if (label) {
+  if (labelKey) {
     const prevWorkout = workouts
-      .filter((w) => w.id !== workoutId && (w.templateName || w.notes) === label)
-      .sort((a, b) => b.date.localeCompare(a.date))[0];
+      .filter((w) => w.id !== workoutId && sessionKey(w.templateName || w.notes) === labelKey)
+      .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.id - a.id))[0];
     if (prevWorkout) {
       const prevWorkoutSets = enriched.filter((s) => s.workoutId === prevWorkout.id);
       const prevVolume = totalVolume(prevWorkoutSets);
